@@ -1,0 +1,8 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "bundler/setup"
+require "cv_parser"
+
+# Initialize and run the CLI
+CvParser::CLI.new.run

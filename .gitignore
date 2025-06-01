@@ -1,0 +1,43 @@
+/.bundle/
+/.yardoc
+/_yardoc/
+/coverage/
+/doc/
+/pkg/
+/spec/reports/
+/tmp/
+
+# rspec failure tracking
+.rspec_status
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Gem files
+*.gem
+
+# Bundler
+vendor/bundle/
+.bundle/
+
+# Test coverage
+coverage/ 
+
+# Examples
+examples/
+
+# Ruby environment
+.ruby-version
+.ruby-gemset
