@@ -356,47 +356,6 @@ RSpec.describe YourResumeProcessor do
 end
 ```
 
-#### Using in Rails Tests
-
-In a Rails application, you might configure the faker provider in your test environment:
-
-```ruby
-# config/environments/test.rb
-Rails.application.configure do
-  # ... other configuration
-
-  # Configure CV Parser with faker for testing
-  config.after_initialize do
-    CvParser.configure do |config|
-      config.provider = :faker
-    end
-  end
-end
-```
-
-#### Using the Faker Provider for Development
-
-You can also use the faker provider during development to avoid consuming API quotas:
-
-```ruby
-# In development.rb or through your app's configuration
-if Rails.env.development? && ENV['USE_FAKER'] == 'true'
-  CvParser.configure do |config|
-    config.provider = :faker
-  end
-end
-```
-
-Then use an environment variable to toggle between real APIs and the faker:
-
-```bash
-# Use faker provider for development
-USE_FAKER=true rails server
-
-# Use real API (when needed)
-USE_FAKER=false rails server
-```
-
 #### Simple Faker Example
 
 ```ruby
