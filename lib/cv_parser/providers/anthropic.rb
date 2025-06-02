@@ -13,18 +13,24 @@ module CvParser
     class Anthropic < Base
       ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
       ANTHROPIC_API_VERSION = "2023-06-01"
-      DEFAULT_MODEL = "claude-3-opus-20240229"
+      DEFAULT_MODEL = "claude-3-5-sonnet-20241022"
       MAX_TOKENS = 4000
       TEMPERATURE = 0.1
 
       def initialize(config)
         super
         @client = setup_client
-        @pdf_converter = CvParser::PdfConverter.new
       end
 
       def extract_data(output_schema:, file_path: nil)
         raise ArgumentError, "File_path must be provided" unless file_path
+
+        # Validate that we have a proper JSON Schema format
+        unless output_schema.is_a?(Hash) &&
+               ((output_schema.key?("type") && output_schema["type"] == "json_schema") ||
+                (output_schema.key?(:type) && output_schema[:type] == "json_schema"))
+          raise ArgumentError, "The Anthropic provider requires a JSON Schema format with 'type: \"json_schema\"'"
+        end
 
         # PDF file approach - use base64 encoding
         validate_file_exists!(file_path)
@@ -87,7 +93,14 @@ module CvParser
       private
 
       def build_extraction_tool(output_schema)
-        # Convert the schema to proper JSON Schema format if it's not already
+        # Validate that we have a proper JSON Schema format
+        unless output_schema.is_a?(Hash) &&
+               ((output_schema.key?("type") && output_schema["type"] == "json_schema") ||
+                (output_schema.key?(:type) && output_schema[:type] == "json_schema"))
+          raise ArgumentError, "Invalid schema format. Please use JSON Schema format with 'type: \"json_schema\"'"
+        end
+
+        # Convert the schema to proper JSON Schema format
         json_schema = normalize_schema_to_json_schema(output_schema)
 
         {
@@ -98,102 +111,28 @@ module CvParser
       end
 
       def normalize_schema_to_json_schema(schema)
+        # If it's already a proper JSON Schema format, extract the schema part
+        if schema.is_a?(Hash) && schema.key?("type") && schema["type"] == "json_schema"
+          # Extract the properties from the JSON Schema format
+          return {
+            type: "object",
+            properties: schema["properties"] || {},
+            required: schema["required"] || []
+          }
+        elsif schema.is_a?(Hash) && schema.key?(:type) && schema[:type] == "json_schema"
+          # Handle symbol keys
+          return {
+            type: "object",
+            properties: schema[:properties] || {},
+            required: schema[:required] || []
+          }
+        end
+
         # If it's already a proper JSON Schema (has type property), return as-is
-        return schema if schema.is_a?(Hash) && schema.key?("type")
-        return schema if schema.is_a?(Hash) && schema.key?(:type)
+        return schema if schema.is_a?(Hash) && (schema.key?("type") || schema.key?(:type))
 
-        # Otherwise, convert our custom schema format to JSON Schema
-        {
-          type: "object",
-          properties: convert_properties(schema),
-          required: schema.keys.map(&:to_s)
-        }
-      end
-
-      def convert_properties(schema)
-        properties = {}
-
-        schema.each do |key, value|
-          property_name = key.to_s
-
-          properties[property_name] = case value
-                                      when String
-                                        if value == "string"
-                                          { type: "string" }
-                                        else
-                                          # Treat as a string literal or description
-                                          { type: "string", description: value }
-                                        end
-                                      when Array
-                                        if value.length == 1 && value[0].is_a?(Hash)
-                                          # Array of objects
-                                          {
-                                            type: "array",
-                                            items: {
-                                              type: "object",
-                                              properties: convert_properties(value[0]),
-                                              required: value[0].keys.map(&:to_s)
-                                            }
-                                          }
-                                        elsif value.length == 1 && value[0] == "string"
-                                          # Array of strings
-                                          {
-                                            type: "array",
-                                            items: { type: "string" }
-                                          }
-                                        else
-                                          # Generic array
-                                          { type: "array" }
-                                        end
-                                      when Hash
-                                        # Nested object
-                                        {
-                                          type: "object",
-                                          properties: convert_properties(value),
-                                          required: value.keys.map(&:to_s)
-                                        }
-                                      else
-                                        # Default to string
-                                        { type: "string" }
-                                      end
-        end
-
-        properties
-      end
-
-      def convert_to_pdf_if_needed(file_path)
-        file_ext = File.extname(file_path).downcase
-
-        case file_ext
-        when ".docx"
-          # Generate a temporary PDF file path
-          temp_pdf_path = File.join(
-            File.dirname(file_path),
-            "#{File.basename(file_path, file_ext)}_converted_#{SecureRandom.hex(8)}.pdf"
-          )
-
-          # Convert DOCX to PDF
-          @pdf_converter.convert(file_path, temp_pdf_path)
-          temp_pdf_path
-        when ".pdf"
-          # Already a PDF, return as-is
-          file_path
-        else
-          # For other file types, let Anthropic handle them directly
-          file_path
-        end
-      rescue StandardError => e
-        raise APIError, "Failed to convert DOCX to PDF: #{e.message}"
-      end
-
-      def cleanup_temp_file(processed_file_path, original_file_path)
-        # Only delete if we created a temporary converted file
-        if processed_file_path != original_file_path && File.exist?(processed_file_path)
-          File.delete(processed_file_path)
-        end
-      rescue StandardError => e
-        # Log the error but don't fail the main operation
-        warn "Warning: Failed to cleanup temporary file #{processed_file_path}: #{e.message}"
+        # If we get here, the schema is not in the expected format
+        raise ArgumentError, "Invalid schema format. Please use JSON Schema format with 'type: \"json_schema\"'"
       end
 
       def setup_client

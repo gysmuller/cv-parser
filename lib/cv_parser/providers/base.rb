@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require "securerandom"
+require_relative "../pdf_converter"
+
 module CvParser
   module Providers
     # Base class for CV parsing providers that defines the common interface
@@ -7,6 +10,7 @@ module CvParser
     class Base
       def initialize(config)
         @config = config
+        @pdf_converter = CvParser::PdfConverter.new
       end
 
       def extract_data(output_schema:, file_path: nil)
@@ -18,6 +22,41 @@ module CvParser
       end
 
       protected
+
+      def convert_to_pdf_if_needed(file_path)
+        file_ext = File.extname(file_path).downcase
+
+        case file_ext
+        when ".docx"
+          # Generate a temporary PDF file path
+          temp_pdf_path = File.join(
+            File.dirname(file_path),
+            "#{File.basename(file_path, file_ext)}_converted_#{SecureRandom.hex(8)}.pdf"
+          )
+
+          # Convert DOCX to PDF
+          @pdf_converter.convert(file_path, temp_pdf_path)
+          temp_pdf_path
+        when ".pdf"
+          # Already a PDF, return as-is
+          file_path
+        else
+          # For other file types, let the provider handle them directly
+          file_path
+        end
+      rescue StandardError => e
+        raise APIError, "Failed to convert DOCX to PDF: #{e.message}"
+      end
+
+      def cleanup_temp_file(processed_file_path, original_file_path)
+        # Only delete if we created a temporary converted file
+        if processed_file_path != original_file_path && File.exist?(processed_file_path)
+          File.delete(processed_file_path)
+        end
+      rescue StandardError => e
+        # Log the error but don't fail the main operation
+        warn "Warning: Failed to cleanup temporary file #{processed_file_path}: #{e.message}"
+      end
 
       def build_extraction_prompt(schema = nil)
         default_prompt = <<~PROMPT
