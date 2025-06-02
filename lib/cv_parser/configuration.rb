@@ -2,7 +2,7 @@
 
 module CvParser
   class Configuration
-    attr_accessor :provider, :model, :api_key, :timeout, :max_retries, :prompt, :system_prompt
+    attr_accessor :provider, :model, :api_key, :timeout, :max_retries, :prompt, :system_prompt, :output_schema
     attr_reader :provider_options
 
     def initialize
@@ -14,6 +14,7 @@ module CvParser
       @provider_options = {}
       @prompt = nil
       @system_prompt = nil
+      @output_schema = nil
     end
   end
 end

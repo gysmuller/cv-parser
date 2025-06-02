@@ -8,14 +8,20 @@ module CvParser
       @provider = build_provider
     end
 
-    def extract(file_path:, output_schema:)
+    def extract(file_path:, output_schema: nil)
       # Validate the file exists and is readable
       validate_file!(file_path)
+
+      # Use provided output_schema or fall back to configuration
+      schema = output_schema || @config.output_schema
+
+      # Validate schema exists
+      raise ConfigurationError, "Output schema not configured" if schema.nil?
 
       # Send file directly to LLM provider for extraction
       @provider.extract_data(
         file_path: file_path,
-        output_schema: output_schema
+        output_schema: schema
       )
     end
 
