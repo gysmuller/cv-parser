@@ -27,7 +27,7 @@ RSpec.describe CvParser::Providers::Anthropic do
     context "with successful API response" do
       before do
         # Mock the Faraday response object to ensure it behaves like the real API
-        # Need to mock the JSON parsing that happens in the provider
+        # Mock tool usage response format
         allow_any_instance_of(Faraday::Connection).to receive(:post).and_return(
           instance_double(
             Faraday::Response,
@@ -37,10 +37,22 @@ RSpec.describe CvParser::Providers::Anthropic do
               "type" => "message",
               "role" => "assistant",
               "model" => "claude-3-opus-20240229",
+              "stop_reason" => "tool_use",
               "content" => [
                 {
-                  "type" => "text",
-                  "text" => '{"name":"John Doe","email":"john@example.com","experience":[{"title":"Software Engineer","years":"5 years"}]}'
+                  "type" => "tool_use",
+                  "id" => "toolu_01PqRsTuVwXyZAbCdEfGh",
+                  "name" => "extract_cv_data",
+                  "input" => {
+                    "name" => "John Doe",
+                    "email" => "john@example.com",
+                    "experience" => [
+                      {
+                        "title" => "Software Engineer",
+                        "years" => "5 years"
+                      }
+                    ]
+                  }
                 }
               ]
             }
@@ -186,7 +198,7 @@ RSpec.describe CvParser::Providers::Anthropic do
       end
     end
 
-    context "with invalid JSON in response" do
+    context "with missing tool_use block in response" do
       before do
         allow_any_instance_of(Faraday::Connection).to receive(:post).and_return(
           instance_double(
@@ -200,7 +212,7 @@ RSpec.describe CvParser::Providers::Anthropic do
               "content" => [
                 {
                   "type" => "text",
-                  "text" => "This is not valid JSON"
+                  "text" => "This is just a text response without any tool use"
                 }
               ]
             }
@@ -221,7 +233,89 @@ RSpec.describe CvParser::Providers::Anthropic do
             file_path: sample_file_path,
             output_schema: output_schema
           )
-        end.to raise_error(CvParser::ParseError, /Failed to parse Claude's response as JSON/)
+        end.to raise_error(CvParser::ParseError, /No tool_use block found/)
+      end
+    end
+
+    context "with wrong tool used in response" do
+      before do
+        allow_any_instance_of(Faraday::Connection).to receive(:post).and_return(
+          instance_double(
+            Faraday::Response,
+            status: 200,
+            body: {
+              "id" => "msg_01234567",
+              "type" => "message",
+              "role" => "assistant",
+              "model" => "claude-3-opus-20240229",
+              "content" => [
+                {
+                  "type" => "tool_use",
+                  "id" => "toolu_01PqRsTuVwXyZAbCdEfGh",
+                  "name" => "wrong_tool",
+                  "input" => {}
+                }
+              ]
+            }
+          )
+        )
+      end
+
+      it "raises a ParseError" do
+        # Mock file operations for a file-based test
+        allow(provider).to receive(:validate_file_exists!)
+        allow(provider).to receive(:validate_file_readable!)
+        allow(provider).to receive(:convert_to_pdf_if_needed).and_return(sample_file_path)
+        allow(File).to receive(:read).with(sample_file_path).and_return("fake pdf content")
+        allow(provider).to receive(:cleanup_temp_file)
+
+        expect do
+          provider.extract_data(
+            file_path: sample_file_path,
+            output_schema: output_schema
+          )
+        end.to raise_error(CvParser::ParseError, /Unexpected tool used/)
+      end
+    end
+
+    context "with non-hash input in tool_use" do
+      before do
+        allow_any_instance_of(Faraday::Connection).to receive(:post).and_return(
+          instance_double(
+            Faraday::Response,
+            status: 200,
+            body: {
+              "id" => "msg_01234567",
+              "type" => "message",
+              "role" => "assistant",
+              "model" => "claude-3-opus-20240229",
+              "content" => [
+                {
+                  "type" => "tool_use",
+                  "id" => "toolu_01PqRsTuVwXyZAbCdEfGh",
+                  "name" => "extract_cv_data",
+                  "input" => "This is a string, not a hash"
+                }
+              ]
+            }
+          )
+        )
+      end
+
+      it "raises a ParseError" do
+        # Mock file operations for a file-based test
+        allow(provider).to receive(:validate_file_exists!)
+        allow(provider).to receive(:validate_file_readable!)
+        allow(provider).to receive(:convert_to_pdf_if_needed).and_return(sample_file_path)
+        allow(File).to receive(:read).with(sample_file_path).and_return("fake pdf content")
+        allow(provider).to receive(:cleanup_temp_file)
+
+        expect do
+          provider.extract_data(
+            file_path: sample_file_path,
+            output_schema: output_schema
+          )
+        end.to raise_error(CvParser::ParseError, /Tool input is not a hash/)
       end
     end
 
