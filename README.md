@@ -242,88 +242,6 @@ export CV_PARSER_API_KEY=your-api-key
 cv-parser resume.pdf
 ```
 
-See the full CLI documentation and options in [examples/cli_usage.md](examples/cli_usage.md).
-
----
-
-### Testing and Development
-
-#### Using the Faker Provider
-
-The Faker provider generates realistic-looking fake data based on your schema, without making API calls. This is useful for:
-- Writing tests (RSpec, Rails, etc.)
-- Developing UI components
-- Demonstrating functionality without API keys
-- Avoiding API costs and rate limits
-
-**RSpec Example:**
-
-```ruby
-# spec/your_resume_processor_spec.rb
-require 'spec_helper'
-
-RSpec.describe YourResumeProcessor do
-  # Define a JSON Schema format schema for testing
-  let(:test_schema) do
-    {
-      type: "json_schema",
-      name: "cv_parsing_test",
-      description: "Test schema for CV parsing",
-      properties: {
-        personal_info: {
-          type: "object",
-          description: "Personal information",
-          properties: {
-            name: {
-              type: "string",
-              description: "Full name"
-            },
-            email: {
-              type: "string",
-              description: "Email address"
-            }
-          },
-          required: %w[name email]
-        },
-        skills: {
-          type: "array",
-          description: "List of skills",
-          items: {
-            type: "string",
-            description: "A skill"
-          }
-        }
-      },
-      required: %w[personal_info skills]
-    }
-  end
-
-  before do
-    # Configure CV Parser to use the faker provider
-    CvParser.configure do |config|
-      config.provider = :faker
-    end
-  end
-
-  after do
-    # Reset configuration after tests
-    CvParser.reset
-  end
-
-  it "processes a resume and extracts relevant fields" do
-    processor = YourResumeProcessor.new
-    result = processor.process_resume("spec/fixtures/sample_resume.pdf", test_schema)
-    
-    # The faker provider will return consistent test data
-    expect(result.personal_info.name).to eq("John Doe")
-    expect(result.personal_info.email).to eq("john.doe@example.com")
-    expect(result.skills).to be_an(Array)
-    expect(result.skills).not_to be_empty
-  end
-end
-```
-
-You can also use the Faker provider in development by toggling with an environment variable (see above).
 
 ## Advanced Configuration
 
@@ -337,8 +255,8 @@ CvParser.configure do |config|
   config.model = 'gpt-4.1-mini'
   
   # Set timeout for file uploads (important for larger files)
-  config.timeout = 120  # Default: 60 seconds
-  config.max_retries = 2  # Default: 3
+  config.timeout = 120  # TODO - not yet implemented
+  config.max_retries = 2  # TODO - not yet implemented
   
   # Provider-specific options
   config.provider_options[:organization_id] = ENV['OPENAI_ORG_ID']
@@ -346,32 +264,28 @@ CvParser.configure do |config|
   # You can also set custom prompts for the LLM:
   config.prompt = "Extract the following fields from the CV..."
   config.system_prompt = "You are a CV parsing assistant."
+
+  # Set the output schema (JSON Schema format)
   config.output_schema = schema
+
+  # Set the max tokens and temperature
   config.max_tokens = 4000
   config.temperature = 0.1
 end
 ```
 
-## How It Works
+### Testing and Development
 
-CV Parser uploads the CV file directly to the LLM provider (OpenAI or Anthropic) and instructs the model to extract structured information according to your schema.
+#### Using the Faker Provider
 
-## Development
-
-After checking out the repo, run `bin/setup` to install dependencies. Then, run `rake spec` to run the tests. You can also run `bin/console` for an interactive prompt that will allow you to experiment.
-
-To install this gem onto your local machine, run `bundle exec rake install`.
-
-## Testing Your Application
-
-### Using the Faker Provider in Tests
-
-The CV Parser gem includes a faker provider specifically designed for testing environments. This allows you to write tests for your application without making actual API calls to OpenAI or Anthropic, which has several benefits:
-
-1. Tests run faster without external API calls
-2. No API costs during test runs
-3. Consistent, predictable results
-4. No need for API keys in CI/CD environments
+The Faker provider generates realistic-looking fake data based on your schema without making API calls. This is useful for:
+- Writing tests (RSpec, Rails, etc.)
+- Developing UI components
+- Demonstrating functionality without API keys
+- Avoiding API costs and rate limits
+- Tests run faster without external API calls
+- Consistent, predictable results
+- No need for API keys in CI/CD environments
 
 #### Basic Test Setup
 
@@ -460,11 +374,7 @@ Rails.application.configure do
 end
 ```
 
-#### Customizing Faker Output for Tests
-
-The faker provider generates realistic-looking data based on your schema. The data is deterministic for fields like name, email, and phone, but randomized for arrays and collections. You can write tests that check for structure without relying on specific content for variable fields.
-
-### Using the Faker Provider for Development
+#### Using the Faker Provider for Development
 
 You can also use the faker provider during development to avoid consuming API quotas:
 
@@ -487,9 +397,7 @@ USE_FAKER=true rails server
 USE_FAKER=false rails server
 ```
 
-## Testing with Faker Provider
-
-For testing purposes, CV Parser includes a faker provider that generates realistic-looking fake data based on your schema structure without making actual API calls:
+#### Simple Faker Example
 
 ```ruby
 # Configure with Faker provider
@@ -508,7 +416,6 @@ result = extractor.extract(
 puts result.inspect
 ```
 
-This is particularly useful for:
-- Writing tests without making API calls
-- Developing UI components that consume CV data
-- Demonstrating functionality without API keys
+#### Data Generation Behavior
+
+The faker provider generates realistic-looking data based on your schema. The data is deterministic for fields like name, email, and phone, but randomized for arrays and collections. You can write tests that check for structure without relying on specific content for variable fields.
