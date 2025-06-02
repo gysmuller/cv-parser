@@ -14,17 +14,13 @@ module CvParser
       API_BASE_URL = "https://api.openai.com/v1"
       API_FILE_URL = "https://api.openai.com/v1/files"
       API_RESPONSES_URL = "https://api.openai.com/v1/responses"
-      DEFAULT_MODEL = "gpt-4o-mini"
+      DEFAULT_MODEL = "gpt-4.1-mini"
 
       def initialize(config)
         super
         @api_key = @config.api_key
         @timeout = @config.timeout || 60
-        @base_headers = {
-          "Authorization" => "Bearer #{@api_key}",
-          "User-Agent" => "cv-parser-ruby/#{CvParser::VERSION}",
-          **@config.provider_options.fetch(:headers, {})
-        }
+        @client = setup_client
       end
 
       def extract_data(output_schema:, file_path: nil)
@@ -90,6 +86,14 @@ module CvParser
       end
 
       private
+
+      def setup_client
+        {
+          http_class: Net::HTTP,
+          timeout: @timeout,
+          headers: @base_headers
+        }
+      end
 
       def create_response_with_file(file_id, schema)
         uri = URI(API_RESPONSES_URL)
@@ -191,10 +195,10 @@ module CvParser
       end
 
       def make_http_request(uri, request)
-        http = Net::HTTP.new(uri.host, uri.port)
+        http = @client[:http_class].new(uri.host, uri.port)
         http.use_ssl = true
-        http.read_timeout = @timeout
-        http.open_timeout = @timeout
+        http.read_timeout = @client[:timeout]
+        http.open_timeout = @client[:timeout]
 
         http.request(request)
       end
@@ -310,6 +314,13 @@ module CvParser
         form_data += "--#{boundary}--\r\n"
 
         form_data
+      end
+
+      protected
+
+      def setup_http_client
+        super
+        @base_headers["Authorization"] = "Bearer #{@api_key}"
       end
     end
   end

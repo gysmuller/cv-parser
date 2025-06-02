@@ -14,8 +14,6 @@ module CvParser
       ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
       ANTHROPIC_API_VERSION = "2023-06-01"
       DEFAULT_MODEL = "claude-3-5-sonnet-20241022"
-      MAX_TOKENS = 4000
-      TEMPERATURE = 0.1
 
       def initialize(config)
         super
@@ -48,13 +46,10 @@ module CvParser
 
         response = @client.post do |req|
           req.headers["Content-Type"] = "application/json"
-          req.headers["x-api-key"] = @config.api_key
-          req.headers["anthropic-version"] = ANTHROPIC_API_VERSION
-
           req.body = {
             model: @config.model || DEFAULT_MODEL,
-            max_tokens: MAX_TOKENS,
-            temperature: TEMPERATURE,
+            max_tokens: @config.max_tokens,
+            temperature: @config.temperature,
             system: build_system_prompt,
             tools: [extraction_tool],
             tool_choice: { type: "tool", name: "extract_cv_data" },
@@ -137,10 +132,11 @@ module CvParser
 
       def setup_client
         Faraday.new(url: ANTHROPIC_API_URL) do |f|
-          f.options.timeout = @config.timeout
+          f.options.timeout = @timeout
           f.request :json
           f.response :json
           f.adapter Faraday.default_adapter
+          @base_headers.each { |key, value| f.headers[key] = value }
         end
       end
 
@@ -183,6 +179,14 @@ module CvParser
         end
       rescue JSON::ParserError => e
         raise ParseError, "Failed to parse Anthropic response as JSON: #{e.message}"
+      end
+
+      protected
+
+      def setup_http_client
+        super
+        @base_headers["x-api-key"] = @api_key
+        @base_headers["anthropic-version"] = ANTHROPIC_API_VERSION
       end
     end
   end

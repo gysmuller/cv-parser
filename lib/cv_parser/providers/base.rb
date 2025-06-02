@@ -11,6 +11,7 @@ module CvParser
       def initialize(config)
         @config = config
         @pdf_converter = CvParser::PdfConverter.new
+        setup_http_client
       end
 
       def extract_data(output_schema:, file_path: nil)
@@ -22,6 +23,15 @@ module CvParser
       end
 
       protected
+
+      def setup_http_client
+        @api_key = @config.api_key
+        @timeout = @config.timeout || 60
+        @base_headers = {
+          "User-Agent" => "cv-parser-ruby/#{CvParser::VERSION}",
+          **@config.provider_options.fetch(:headers, {})
+        }
+      end
 
       def convert_to_pdf_if_needed(file_path)
         file_ext = File.extname(file_path).downcase
