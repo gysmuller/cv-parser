@@ -6,7 +6,7 @@ A Ruby gem for parsing and extracting structured information from CVs/resumes us
 - Convert DOCX to PDF before uploading to LLM providers
 - Extract structured data from CVs by directly uploading files to LLM providers
 - Configure different LLM providers (OpenAI, Anthropic, and Faker for testing)
-- Customizable output schema to match your data requirements
+- Customizable output schema to match your data requirements (JSON Schema format)
 - Command-line interface for quick parsing and analysis
 - Robust error handling and validation
 
@@ -48,52 +48,143 @@ CvParser.configure do |config|
   config.provider = :openai
   config.api_key = ENV['OPENAI_API_KEY']
   config.model = 'gpt-4.1-mini'
+  config.output_schema = schema
 end
 
 # Anthropic
 CvParser.configure do |config|
   config.provider = :anthropic
   config.api_key = ENV['ANTHROPIC_API_KEY']
-  config.model = 'claude-3-sonnet-20240229'  # Optional
+  config.model = 'claude-3-sonnet-20240229'
+  config.output_schema = schema
 end
 
 # Faker (for testing/development)
 CvParser.configure do |config|
   config.provider = :faker
+  config.output_schema = schema
 end
 ```
 
 #### Defining an Output Schema
 
-Define the schema for the data you want to extract:
+Define the schema for the data you want to extract using JSON Schema format:
 
 ```ruby
 schema = {
-  personal_info: {
-    name: "string",
-    email: "string",
-    phone: "string",
-    location: "string"
+  type: "json_schema",
+  name: "cv_parsing",
+  description: "Schema for a CV or resume document",
+  properties: {
+    personal_info: {
+      type: "object",
+      description: "Personal and contact information for the candidate",
+      properties: {
+        name: {
+          type: "string",
+          description: "Full name of the individual"
+        },
+        email: {
+          type: "string",
+          description: "Email address of the individual"
+        },
+        phone: {
+          type: "string",
+          description: "Phone number of the individual"
+        },
+        location: {
+          type: "string",
+          description: "Geographic location or city of residence"
+        }
+      },
+      required: %w[name email]
+    },
+    experience: {
+      type: "array",
+      description: "List of professional experience entries",
+      items: {
+        type: "object",
+        description: "A professional experience entry",
+        properties: {
+          company: {
+            type: "string",
+            description: "Name of the company or organization"
+          },
+          position: {
+            type: "string",
+            description: "Job title or position held"
+          },
+          start_date: {
+            type: "string",
+            description: "Start date of employment (e.g. '2020-01')"
+          },
+          end_date: {
+            type: "string",
+            description: "End date of employment or 'present'"
+          },
+          description: {
+            type: "string",
+            description: "Description of responsibilities and achievements"
+          }
+        },
+        required: %w[company position start_date]
+      }
+    },
+    education: {
+      type: "array",
+      description: "List of educational qualifications",
+      items: {
+        type: "object",
+        description: "An education entry",
+        properties: {
+          institution: {
+            type: "string",
+            description: "Name of the educational institution"
+          },
+          degree: {
+            type: "string",
+            description: "Degree or certification received"
+          },
+          field: {
+            type: "string",
+            description: "Field of study"
+          },
+          graduation_date: {
+            type: "string",
+            description: "Graduation date (e.g. '2019-06')"
+          }
+        },
+        required: %w[institution degree]
+      }
+    },
+    skills: {
+      type: "array",
+      description: "List of relevant skills",
+      items: {
+        type: "string",
+        description: "A single skill"
+      }
+    }
   },
-  experience: [
-    {
-      company: "string",
-      position: "string",
-      start_date: "string",
-      end_date: "string",
-      description: "string"
-    }
-  ],
-  education: [
-    {
-      institution: "string",
-      degree: "string",
-      field: "string",
-      graduation_date: "string"
-    }
-  ],
-  skills: ["string"]
+  required: %w[personal_info experience education skills]
 }
+```
+
+Set the output schema in the configuration block:
+
+```ruby
+CvParser.configure do |config|
+  config.output_schema = schema
+end
+```
+
+You can also set the output schema in the extractor method which will override the configuration block:
+
+```ruby
+extractor = CvParser::Extractor.new
+extractor.extract(
+  output_schema: schema
+)
 ```
 
 #### Extracting Data from a CV
@@ -101,8 +192,7 @@ schema = {
 ```ruby
 extractor = CvParser::Extractor.new
 result = extractor.extract(
-  file_path: "path/to/resume.pdf",
-  output_schema: schema
+  file_path: "path/to/resume.pdf"
 )
 
 puts "Name: #{result['personal_info']['name']}"
@@ -115,8 +205,7 @@ result['skills'].each { |skill| puts "- #{skill}" }
 ```ruby
 begin
   result = extractor.extract(
-    file_path: "path/to/resume.pdf",
-    output_schema: schema
+    file_path: "path/to/resume.pdf"
   )
 rescue CvParser::FileNotFoundError, CvParser::FileNotReadableError => e
   puts "File error: #{e.message}"
@@ -170,19 +259,67 @@ The Faker provider generates realistic-looking fake data based on your schema, w
 **RSpec Example:**
 
 ```ruby
-before do
-  CvParser.configure { |config| config.provider = :faker }
-end
+# spec/your_resume_processor_spec.rb
+require 'spec_helper'
 
-after do
-  CvParser.reset
-end
+RSpec.describe YourResumeProcessor do
+  # Define a JSON Schema format schema for testing
+  let(:test_schema) do
+    {
+      type: "json_schema",
+      name: "cv_parsing_test",
+      description: "Test schema for CV parsing",
+      properties: {
+        personal_info: {
+          type: "object",
+          description: "Personal information",
+          properties: {
+            name: {
+              type: "string",
+              description: "Full name"
+            },
+            email: {
+              type: "string",
+              description: "Email address"
+            }
+          },
+          required: %w[name email]
+        },
+        skills: {
+          type: "array",
+          description: "List of skills",
+          items: {
+            type: "string",
+            description: "A skill"
+          }
+        }
+      },
+      required: %w[personal_info skills]
+    }
+  end
 
-it "processes a resume and extracts relevant fields" do
-  extractor = CvParser::Extractor.new
-  result = extractor.extract(file_path: "spec/fixtures/sample_resume.pdf", output_schema: schema)
-  expect(result['personal_info']['name']).to eq("John Doe")
-  expect(result['skills']).to be_an(Array)
+  before do
+    # Configure CV Parser to use the faker provider
+    CvParser.configure do |config|
+      config.provider = :faker
+    end
+  end
+
+  after do
+    # Reset configuration after tests
+    CvParser.reset
+  end
+
+  it "processes a resume and extracts relevant fields" do
+    processor = YourResumeProcessor.new
+    result = processor.process_resume("spec/fixtures/sample_resume.pdf", test_schema)
+    
+    # The faker provider will return consistent test data
+    expect(result.personal_info.name).to eq("John Doe")
+    expect(result.personal_info.email).to eq("john.doe@example.com")
+    expect(result.skills).to be_an(Array)
+    expect(result.skills).not_to be_empty
+  end
 end
 ```
 
@@ -209,6 +346,9 @@ CvParser.configure do |config|
   # You can also set custom prompts for the LLM:
   config.prompt = "Extract the following fields from the CV..."
   config.system_prompt = "You are a CV parsing assistant."
+  config.output_schema = schema
+  config.max_tokens = 4000
+  config.temperature = 0.1
 end
 ```
 
@@ -242,6 +382,41 @@ Here's how to use the faker provider in your RSpec tests:
 require 'spec_helper'
 
 RSpec.describe YourResumeProcessor do
+  # Define a JSON Schema format schema for testing
+  let(:test_schema) do
+    {
+      type: "json_schema",
+      name: "cv_parsing_test",
+      description: "Test schema for CV parsing",
+      properties: {
+        personal_info: {
+          type: "object",
+          description: "Personal information",
+          properties: {
+            name: {
+              type: "string",
+              description: "Full name"
+            },
+            email: {
+              type: "string",
+              description: "Email address"
+            }
+          },
+          required: %w[name email]
+        },
+        skills: {
+          type: "array",
+          description: "List of skills",
+          items: {
+            type: "string",
+            description: "A skill"
+          }
+        }
+      },
+      required: %w[personal_info skills]
+    }
+  end
+
   before do
     # Configure CV Parser to use the faker provider
     CvParser.configure do |config|
@@ -256,11 +431,11 @@ RSpec.describe YourResumeProcessor do
 
   it "processes a resume and extracts relevant fields" do
     processor = YourResumeProcessor.new
-    result = processor.process_resume("spec/fixtures/sample_resume.pdf")
+    result = processor.process_resume("spec/fixtures/sample_resume.pdf", test_schema)
     
     # The faker provider will return consistent test data
-    expect(result.name).to eq("John Doe")
-    expect(result.email).to eq("john.doe@example.com")
+    expect(result.personal_info.name).to eq("John Doe")
+    expect(result.personal_info.email).to eq("john.doe@example.com")
     expect(result.skills).to be_an(Array)
     expect(result.skills).not_to be_empty
   end
@@ -326,7 +501,7 @@ end
 extractor = CvParser::Extractor.new
 result = extractor.extract(
   file_path: "path/to/resume.pdf",  # Path will be ignored by faker
-  output_schema: schema
+  output_schema: schema  # Using the JSON Schema format defined above
 )
 
 # Faker will generate structured data based on your schema

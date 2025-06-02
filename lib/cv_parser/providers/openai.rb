@@ -14,22 +14,24 @@ module CvParser
       API_BASE_URL = "https://api.openai.com/v1"
       API_FILE_URL = "https://api.openai.com/v1/files"
       API_RESPONSES_URL = "https://api.openai.com/v1/responses"
-      DEFAULT_MODEL = "gpt-4o-mini"
+      DEFAULT_MODEL = "gpt-4.1-mini"
 
       def initialize(config)
         super
         @api_key = @config.api_key
         @timeout = @config.timeout || 60
-        @pdf_converter = CvParser::PdfConverter.new
-        @base_headers = {
-          "Authorization" => "Bearer #{@api_key}",
-          "User-Agent" => "cv-parser-ruby/#{CvParser::VERSION}",
-          **@config.provider_options.fetch(:headers, {})
-        }
+        @client = setup_client
       end
 
       def extract_data(output_schema:, file_path: nil)
         raise ArgumentError, "File_path must be provided" unless file_path
+
+        # Validate that we have a proper JSON Schema format
+        unless output_schema.is_a?(Hash) &&
+               ((output_schema.key?("type") && output_schema["type"] == "json_schema") ||
+                (output_schema.key?(:type) && output_schema[:type] == "json_schema"))
+          raise ArgumentError, "The OpenAI provider requires a JSON Schema format with 'type: \"json_schema\"'"
+        end
 
         # File upload approach using Responses API
         validate_file_exists!(file_path)
@@ -85,39 +87,12 @@ module CvParser
 
       private
 
-      def convert_to_pdf_if_needed(file_path)
-        file_ext = File.extname(file_path).downcase
-
-        case file_ext
-        when ".docx"
-          # Generate a temporary PDF file path
-          temp_pdf_path = File.join(
-            File.dirname(file_path),
-            "#{File.basename(file_path, file_ext)}_converted_#{SecureRandom.hex(8)}.pdf"
-          )
-
-          # Convert DOCX to PDF
-          @pdf_converter.convert(file_path, temp_pdf_path)
-          temp_pdf_path
-        when ".pdf"
-          # Already a PDF, return as-is
-          file_path
-        else
-          # For other file types, let OpenAI handle them directly
-          file_path
-        end
-      rescue StandardError => e
-        raise APIError, "Failed to convert DOCX to PDF: #{e.message}"
-      end
-
-      def cleanup_temp_file(processed_file_path, original_file_path)
-        # Only delete if we created a temporary converted file
-        if processed_file_path != original_file_path && File.exist?(processed_file_path)
-          File.delete(processed_file_path)
-        end
-      rescue StandardError => e
-        # Log the error but don't fail the main operation
-        warn "Warning: Failed to cleanup temporary file #{processed_file_path}: #{e.message}"
+      def setup_client
+        {
+          http_class: Net::HTTP,
+          timeout: @timeout,
+          headers: @base_headers
+        }
       end
 
       def create_response_with_file(file_id, schema)
@@ -139,36 +114,69 @@ module CvParser
       end
 
       def schema_to_json_schema(schema)
-        json_schema = {
-          type: "object",
-          properties: {},
-          required: [],
-          additionalProperties: false
-        }
-
-        schema.each do |key, value|
-          if value == "string"
-            json_schema[:properties][key] = { type: "string" }
-            json_schema[:required] << key
-          elsif %w[number integer].include?(value)
-            json_schema[:properties][key] = { type: value }
-            json_schema[:required] << key
-          elsif value == "boolean"
-            json_schema[:properties][key] = { type: "boolean" }
-            json_schema[:required] << key
-          elsif value.is_a?(Array)
-            json_schema[:properties][key] = {
-              type: "array",
-              items: value.first.is_a?(Hash) ? schema_to_json_schema(value.first) : { type: "string" }
-            }
-            json_schema[:required] << key
-          elsif value.is_a?(Hash)
-            json_schema[:properties][key] = schema_to_json_schema(value)
-            json_schema[:required] << key
-          end
+        # If it's already a proper JSON Schema format, extract the schema part
+        if schema.is_a?(Hash) && schema.key?("type") && schema["type"] == "json_schema"
+          # Extract the properties from the JSON Schema format and ensure additionalProperties is set
+          properties = schema["properties"] || {}
+          processed_properties = ensure_additional_properties(properties)
+          return {
+            type: "object",
+            properties: processed_properties,
+            required: processed_properties.keys,
+            additionalProperties: false
+          }
+        elsif schema.is_a?(Hash) && schema.key?(:type) && schema[:type] == "json_schema"
+          # Handle symbol keys
+          properties = schema[:properties] || {}
+          processed_properties = ensure_additional_properties(properties)
+          return {
+            type: "object",
+            properties: processed_properties,
+            required: processed_properties.keys,
+            additionalProperties: false
+          }
         end
 
-        json_schema
+        # If we get here, the schema is not in the expected format
+        raise ArgumentError, "Invalid schema format. Please use JSON Schema format with 'type: \"json_schema\"'"
+      end
+
+      def ensure_additional_properties(properties)
+        result = {}
+        properties.each do |key, value|
+          if value.is_a?(Hash)
+            if value["type"] == "object" || value[:type] == "object"
+              # Ensure object types have additionalProperties set to false and all properties are required
+              nested_props = value["properties"] || value[:properties] || {}
+              processed_nested_props = ensure_additional_properties(nested_props)
+              result[key] = value.merge(
+                additionalProperties: false,
+                properties: processed_nested_props,
+                required: processed_nested_props.keys
+              )
+            elsif value["type"] == "array" || value[:type] == "array"
+              # Handle array items
+              items = value["items"] || value[:items]
+              if items.is_a?(Hash) && (items["type"] == "object" || items[:type] == "object")
+                nested_props = items["properties"] || items[:properties] || {}
+                processed_nested_props = ensure_additional_properties(nested_props)
+                updated_items = items.merge(
+                  additionalProperties: false,
+                  properties: processed_nested_props,
+                  required: processed_nested_props.keys
+                )
+                result[key] = value.merge(items: updated_items)
+              else
+                result[key] = value
+              end
+            else
+              result[key] = value
+            end
+          else
+            result[key] = value
+          end
+        end
+        result
       end
 
       def make_responses_api_request(uri, payload)
@@ -187,10 +195,10 @@ module CvParser
       end
 
       def make_http_request(uri, request)
-        http = Net::HTTP.new(uri.host, uri.port)
+        http = @client[:http_class].new(uri.host, uri.port)
         http.use_ssl = true
-        http.read_timeout = @timeout
-        http.open_timeout = @timeout
+        http.read_timeout = @client[:timeout]
+        http.open_timeout = @client[:timeout]
 
         http.request(request)
       end
@@ -306,6 +314,13 @@ module CvParser
         form_data += "--#{boundary}--\r\n"
 
         form_data
+      end
+
+      protected
+
+      def setup_http_client
+        super
+        @base_headers["Authorization"] = "Bearer #{@api_key}"
       end
     end
   end

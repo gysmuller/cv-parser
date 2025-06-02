@@ -15,10 +15,16 @@ RSpec.describe CvParser::Providers::Faker do
     context "with a basic schema" do
       let(:output_schema) do
         {
-          name: "string",
-          email: "string",
-          phone: "string",
-          skills: ["string"]
+          type: "json_schema",
+          properties: {
+            name: { type: "string" },
+            email: { type: "string" },
+            phone: { type: "string" },
+            skills: {
+              type: "array",
+              items: { type: "string" }
+            }
+          }
         }
       end
 
@@ -38,23 +44,34 @@ RSpec.describe CvParser::Providers::Faker do
     context "with a nested schema" do
       let(:output_schema) do
         {
-          name: "string",
-          experience: [
-            {
-              company: "string",
-              title: "string",
-              start_date: "string",
-              end_date: "string"
+          type: "json_schema",
+          properties: {
+            name: { type: "string" },
+            experience: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  company: { type: "string" },
+                  title: { type: "string" },
+                  start_date: { type: "string" },
+                  end_date: { type: "string" }
+                }
+              }
+            },
+            education: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  university: { type: "string" },
+                  degree: { type: "string" },
+                  major: { type: "string" },
+                  year: { type: "string" }
+                }
+              }
             }
-          ],
-          education: [
-            {
-              university: "string",
-              degree: "string",
-              major: "string",
-              year: "string"
-            }
-          ]
+          }
         }
       end
 

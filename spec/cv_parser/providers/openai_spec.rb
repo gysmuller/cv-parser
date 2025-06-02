@@ -15,9 +15,21 @@ RSpec.describe CvParser::Providers::OpenAI do
   let(:sample_file_path) { "/tmp/test.pdf" }
   let(:output_schema) do
     {
-      name: "string",
-      email: "string",
-      experience: [{ title: "string", years: "string" }]
+      type: "json_schema",
+      properties: {
+        name: { type: "string" },
+        email: { type: "string" },
+        experience: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+              years: { type: "string" }
+            }
+          }
+        }
+      }
     }
   end
 

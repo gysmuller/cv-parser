@@ -7,34 +7,66 @@ require_relative "../cv_parser"
 module CvParser
   class CLI
     DEFAULT_SCHEMA = {
-      contact_information: {
-        name: "string",
-        email: "string",
-        phone: "string",
-        location: "string",
-        linkedin: "string"
-      },
-      education: [
-        {
-          institution: "string",
-          degree: "string",
-          field_of_study: "string",
-          dates: "string",
-          achievements: ["string"]
+      type: "json_schema",
+      properties: {
+        contact_information: {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+            email: { type: "string" },
+            phone: { type: "string" },
+            location: { type: "string" },
+            linkedin: { type: "string" }
+          }
+        },
+        education: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              institution: { type: "string" },
+              degree: { type: "string" },
+              field_of_study: { type: "string" },
+              dates: { type: "string" },
+              achievements: {
+                type: "array",
+                items: { type: "string" }
+              }
+            }
+          }
+        },
+        work_experience: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              company: { type: "string" },
+              position: { type: "string" },
+              dates: { type: "string" },
+              responsibilities: {
+                type: "array",
+                items: { type: "string" }
+              },
+              achievements: {
+                type: "array",
+                items: { type: "string" }
+              }
+            }
+          }
+        },
+        skills: {
+          type: "array",
+          items: { type: "string" }
+        },
+        languages: {
+          type: "array",
+          items: { type: "string" }
+        },
+        certifications: {
+          type: "array",
+          items: { type: "string" }
         }
-      ],
-      work_experience: [
-        {
-          company: "string",
-          position: "string",
-          dates: "string",
-          responsibilities: ["string"],
-          achievements: ["string"]
-        }
-      ],
-      skills: ["string"],
-      languages: ["string"],
-      certifications: ["string"]
+      }
     }.freeze
 
     def initialize
