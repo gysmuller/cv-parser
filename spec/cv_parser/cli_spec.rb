@@ -15,12 +15,12 @@ RSpec.describe CvParser::CLI do
       File.write(test_file, "# Sample Resume\n\nJohn Doe\nSoftware Engineer")
     end
 
-    # Stub ENV variables
+    # Stub ENV variables with a default for any key
+    allow(ENV).to receive(:[]) { |key| nil }
     allow(ENV).to receive(:[]).with("CV_PARSER_PROVIDER").and_return(nil)
     allow(ENV).to receive(:[]).with("CV_PARSER_API_KEY").and_return(nil)
     allow(ENV).to receive(:[]).with("OPENAI_API_KEY").and_return("test-openai-key")
     allow(ENV).to receive(:[]).with("ANTHROPIC_API_KEY").and_return(nil)
-    allow(ENV).to receive(:fetch).with("ANTHROPIC_API_KEY", nil).and_return(nil)
 
     # Mock the extractor to prevent actual API calls
     extractor = instance_double(CvParser::Extractor)
@@ -70,18 +70,31 @@ RSpec.describe CvParser::CLI do
 
     context "with valid input file" do
       it "configures the parser and extracts data" do
-        cli.run([test_file])
-        expect(CvParser.configuration.provider).to eq(:openai)
-        expect(CvParser.configuration.api_key).to eq("test-openai-key")
+        # Use faker provider to avoid API key issues
+        cli.run(["--provider", "faker", test_file])
+        expect(CvParser.configuration.provider).to eq(:faker)
+        expect(CvParser.configuration.api_key).to eq("fake-api-key")
         expect(output.string).to include("Parsing CV: #{test_file}")
-        expect(output.string).to include("Using provider: openai")
+        expect(output.string).to include("Using provider: faker")
         expect(output.string).to include("John Doe")
       end
 
-      it "respects provider option" do
+      it "respects provider option with openai" do
+        cli.run(["--provider", "openai", "--api-key", "test-key", test_file])
+        expect(CvParser.configuration.provider).to eq(:openai)
+        expect(CvParser.configuration.api_key).to eq("test-key")
+      end
+
+      it "respects provider option with anthropic" do
         cli.run(["--provider", "anthropic", "--api-key", "test-key", test_file])
         expect(CvParser.configuration.provider).to eq(:anthropic)
         expect(CvParser.configuration.api_key).to eq("test-key")
+      end
+
+      it "respects provider option with faker" do
+        cli.run(["--provider", "faker", test_file])
+        expect(CvParser.configuration.provider).to eq(:faker)
+        expect(CvParser.configuration.api_key).to eq("fake-api-key")
       end
 
       it "respects output format option" do

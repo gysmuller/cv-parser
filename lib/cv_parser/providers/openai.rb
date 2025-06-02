@@ -12,6 +12,9 @@ module CvParser
   module Providers
     class OpenAI < Base
       API_BASE_URL = "https://api.openai.com/v1"
+      API_FILE_URL = "https://api.openai.com/v1/files"
+      API_RESPONSES_URL = "https://api.openai.com/v1/responses"
+      DEFAULT_MODEL = "gpt-4o-mini"
 
       def initialize(config)
         super
@@ -25,26 +28,21 @@ module CvParser
         }
       end
 
-      def extract_data(output_schema:, content: nil, file_path: nil)
-        if file_path
-          # File upload approach using Responses API
-          validate_file_exists!(file_path)
-          validate_file_readable!(file_path)
+      def extract_data(output_schema:, file_path: nil)
+        raise ArgumentError, "File_path must be provided" unless file_path
 
-          # Convert DOCX to PDF if necessary
-          processed_file_path = convert_to_pdf_if_needed(file_path)
+        # File upload approach using Responses API
+        validate_file_exists!(file_path)
+        validate_file_readable!(file_path)
 
-          file_id = upload_file(processed_file_path)
-          response = create_response_with_file(file_id, output_schema)
+        # Convert DOCX to PDF if necessary
+        processed_file_path = convert_to_pdf_if_needed(file_path)
 
-          # Clean up temporary PDF file if we created one
-          cleanup_temp_file(processed_file_path, file_path)
-        elsif content
-          # Text content approach using Responses API
-          response = create_response_with_text(content, output_schema)
-        else
-          raise ArgumentError, "Either content or file_path must be provided"
-        end
+        file_id = upload_file(processed_file_path)
+        response = create_response_with_file(file_id, output_schema)
+
+        # Clean up temporary PDF file if we created one
+        cleanup_temp_file(processed_file_path, file_path)
 
         # Parse the response from the Responses API
         parse_response_output(response)
@@ -57,7 +55,7 @@ module CvParser
       end
 
       def upload_file(file_path)
-        uri = URI("#{API_BASE_URL}/files")
+        uri = URI(API_FILE_URL)
 
         # Read file content and determine MIME type
         file_content = File.read(file_path, mode: "rb")
@@ -123,11 +121,11 @@ module CvParser
       end
 
       def create_response_with_file(file_id, schema)
-        uri = URI("#{API_BASE_URL}/responses")
+        uri = URI(API_RESPONSES_URL)
 
         payload = {
-          model: @config.model || "gpt-4o-mini",
-          input: build_file_input_for_responses_api(file_id, schema),
+          model: @config.model || DEFAULT_MODEL,
+          input: build_file_input_for_responses_api(file_id),
           text: {
             format: {
               type: "json_schema",
@@ -135,25 +133,6 @@ module CvParser
               schema: schema_to_json_schema(schema)
             }
           }
-        }
-
-        make_responses_api_request(uri, payload)
-      end
-
-      def create_response_with_text(content, schema)
-        uri = URI("#{API_BASE_URL}/responses")
-
-        payload = {
-          model: @config.model || "gpt-4.1-mini",
-          input: build_text_input_for_responses_api(content, schema),
-          text: {
-            format: {
-              type: "json_schema",
-              name: "cv_data_extraction",
-              schema: schema_to_json_schema(schema)
-            }
-          },
-          temperature: 0.1
         }
 
         make_responses_api_request(uri, payload)
@@ -216,7 +195,7 @@ module CvParser
         http.request(request)
       end
 
-      def build_file_input_for_responses_api(file_id, schema)
+      def build_file_input_for_responses_api(file_id)
         [
           {
             role: "user",
@@ -232,55 +211,6 @@ module CvParser
             ]
           }
         ]
-      end
-
-      def build_text_input_for_responses_api(content, schema)
-        [
-          {
-            role: "user",
-            content: [
-              {
-                type: "input_text",
-                text: "#{build_extraction_prompt}\n\nDocument content:\n#{content}"
-              }
-            ]
-          }
-        ]
-      end
-
-      def build_extraction_prompt
-        <<~PROMPT
-          You are a CV parsing assistant. Extract structured information from the attached CV/Resume.
-
-          Instructions:
-          1. Extract all the requested fields from the CV.
-          2. Maintain the exact structure defined in the schema.
-          3. If information for a field is not available, use null or empty arrays as appropriate.
-          4. For dates, use the format provided in the CV.
-          5. Return only JSON without any additional explanations.
-        PROMPT
-      end
-
-      def build_multipart_form_data(file_content, filename, mime_type, boundary)
-        form_data = ""
-
-        # Add file field
-        form_data += "--#{boundary}\r\n"
-        form_data += "Content-Disposition: form-data; name=\"file\"; filename=\"#{filename}\"\r\n"
-        form_data += "Content-Type: #{mime_type}\r\n\r\n"
-        form_data += file_content
-        form_data += "\r\n"
-
-        # Add purpose field
-        form_data += "--#{boundary}\r\n"
-        form_data += "Content-Disposition: form-data; name=\"purpose\"\r\n\r\n"
-        form_data += "assistants"
-        form_data += "\r\n"
-
-        # End boundary
-        form_data += "--#{boundary}--\r\n"
-
-        form_data
       end
 
       def parse_response_output(response)
@@ -354,6 +284,28 @@ module CvParser
         end
 
         raise APIError, "OpenAI API error: #{error.message}"
+      end
+
+      def build_multipart_form_data(file_content, filename, mime_type, boundary)
+        form_data = ""
+
+        # Add file field
+        form_data += "--#{boundary}\r\n"
+        form_data += "Content-Disposition: form-data; name=\"file\"; filename=\"#{filename}\"\r\n"
+        form_data += "Content-Type: #{mime_type}\r\n\r\n"
+        form_data += file_content
+        form_data += "\r\n"
+
+        # Add purpose field
+        form_data += "--#{boundary}\r\n"
+        form_data += "Content-Disposition: form-data; name=\"purpose\"\r\n\r\n"
+        form_data += "assistants"
+        form_data += "\r\n"
+
+        # End boundary
+        form_data += "--#{boundary}--\r\n"
+
+        form_data
       end
     end
   end

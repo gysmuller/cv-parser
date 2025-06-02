@@ -12,9 +12,10 @@ module CvParser
   module Providers
     class Anthropic < Base
       ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
-
       ANTHROPIC_API_VERSION = "2023-06-01"
       DEFAULT_MODEL = "claude-3-opus-20240229"
+      MAX_TOKENS = 4000
+      TEMPERATURE = 0.1
 
       def initialize(config)
         super
@@ -22,78 +23,56 @@ module CvParser
         @pdf_converter = CvParser::PdfConverter.new
       end
 
-      def extract_data(output_schema:, content: nil, file_path: nil)
-        if file_path
-          # PDF file approach - use base64 encoding
-          validate_file_exists!(file_path)
-          validate_file_readable!(file_path)
+      def extract_data(output_schema:, file_path: nil)
+        raise ArgumentError, "File_path must be provided" unless file_path
 
-          # Convert DOCX to PDF if necessary
-          processed_file_path = convert_to_pdf_if_needed(file_path)
+        # PDF file approach - use base64 encoding
+        validate_file_exists!(file_path)
+        validate_file_readable!(file_path)
 
-          # Read the file and encode it
-          pdf_content = File.read(processed_file_path)
-          base64_encoded_pdf = Base64.strict_encode64(pdf_content)
+        # Convert DOCX to PDF if necessary
+        processed_file_path = convert_to_pdf_if_needed(file_path)
 
-          response = @client.post do |req|
-            req.headers["Content-Type"] = "application/json"
-            req.headers["x-api-key"] = @config.api_key
-            req.headers["anthropic-version"] = ANTHROPIC_API_VERSION
+        # Read the file and encode it
+        pdf_content = File.read(processed_file_path)
+        base64_encoded_pdf = Base64.strict_encode64(pdf_content)
 
-            req.body = {
-              model: @config.model || DEFAULT_MODEL,
-              max_tokens: 4000,
-              temperature: 0.1,
-              system: "You are a CV parsing assistant. Extract information from CVs and format as JSON.",
-              messages: [
-                {
-                  role: "user",
-                  content: [
-                    # PDF document as base64
-                    {
-                      type: "document",
-                      source: {
-                        type: "base64",
-                        media_type: "application/pdf",
-                        data: base64_encoded_pdf
-                      }
-                    },
-                    # Instructions for extraction
-                    {
-                      type: "text",
-                      text: "Extract structured information from the attached CV/Resume as JSON with the following schema:\n#{output_schema.to_json}\n\nInstructions:\n1. Extract all the requested fields from the CV.\n2. Maintain the exact structure defined in the schema.\n3. If information for a field is not available, use null or empty arrays as appropriate.\n4. For dates, use the format provided in the CV.\n5. Return only raw JSON without any markdown formatting, code blocks, or additional explanations.\n6. Do not prefix your response with ```json or any other markdown syntax.\n7. Start your response with the opening curly brace { and end with the closing curly brace }."
+        response = @client.post do |req|
+          req.headers["Content-Type"] = "application/json"
+          req.headers["x-api-key"] = @config.api_key
+          req.headers["anthropic-version"] = ANTHROPIC_API_VERSION
+
+          req.body = {
+            model: @config.model || DEFAULT_MODEL,
+            max_tokens: MAX_TOKENS,
+            temperature: TEMPERATURE,
+            system: build_system_prompt,
+            messages: [
+              {
+                role: "user",
+                content: [
+                  # PDF document as base64
+                  {
+                    type: "document",
+                    source: {
+                      type: "base64",
+                      media_type: "application/pdf",
+                      data: base64_encoded_pdf
                     }
-                  ]
-                }
-              ]
-            }.to_json
-          end
-
-          # Clean up temporary PDF file if we created one
-          cleanup_temp_file(processed_file_path, file_path)
-        elsif content
-          # Text content approach
-          response = @client.post do |req|
-            req.headers["Content-Type"] = "application/json"
-            req.headers["x-api-key"] = @config.api_key
-            req.headers["anthropic-version"] = ANTHROPIC_API_VERSION
-
-            req.body = {
-              model: @config.model || DEFAULT_MODEL,
-              max_tokens: 4000,
-              temperature: 0.1,
-              system: "You are a CV parsing assistant. Extract information from CVs and format as JSON.",
-              messages: [
-                {
-                  role: "user",
-                  content: build_prompt(content, output_schema)
-                }
-              ]
-            }.to_json
-          end
-        else
-          raise ArgumentError, "Either content or file_path must be provided"
+                  },
+                  # Instructions for extraction
+                  {
+                    type: "text",
+                    text: build_extraction_prompt(output_schema)
+                  }
+                ]
+              }
+            ]
+          }.to_json
         end
+
+        # Clean up temporary PDF file if we created one
+        cleanup_temp_file(processed_file_path, file_path)
 
         handle_response(response, output_schema)
       rescue Faraday::Error => e

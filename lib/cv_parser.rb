@@ -6,6 +6,7 @@ require_relative "cv_parser/errors"
 require_relative "cv_parser/providers/base"
 require_relative "cv_parser/providers/openai"
 require_relative "cv_parser/providers/anthropic"
+require_relative "cv_parser/providers/faker"
 require_relative "cv_parser/extractor"
 require_relative "cv_parser/cli"
 
@@ -16,7 +17,13 @@ module CvParser
     end
 
     def configure
-      yield(configuration) if block_given?
+      if block_given?
+        yield(configuration)
+        # The block is expected to create a new Configuration and assign it
+        # to @configuration via instance_variable_set, but if not, we can
+        # still use the default configuration initialized above
+      end
+      configuration
     end
 
     def reset

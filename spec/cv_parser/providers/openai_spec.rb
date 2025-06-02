@@ -5,13 +5,14 @@ require "spec_helper"
 RSpec.describe CvParser::Providers::OpenAI do
   let(:config) do
     config = CvParser::Configuration.new
-    config.configure_openai(access_token: "fake-api-key")
+    config.provider = :openai
+    config.api_key = "fake-api-key"
     config.model = "gpt-4o-mini"
     config
   end
 
   let(:provider) { described_class.new(config) }
-  let(:sample_content) { "John Doe\nEmail: john@example.com\nExperience: 5 years as Software Engineer" }
+  let(:sample_file_path) { "/tmp/test.pdf" }
   let(:output_schema) do
     {
       name: "string",
@@ -22,6 +23,19 @@ RSpec.describe CvParser::Providers::OpenAI do
 
   describe "#extract_data" do
     before do
+      # Mock file operations
+      allow(File).to receive(:exist?).with(sample_file_path).and_return(true)
+      allow(File).to receive(:readable?).with(sample_file_path).and_return(true)
+      allow(File).to receive(:read).with(sample_file_path, mode: "rb").and_return("fake pdf content")
+      allow(File).to receive(:basename).with(sample_file_path).and_return("test.pdf")
+      allow(provider).to receive(:convert_to_pdf_if_needed).and_return(sample_file_path)
+      allow(provider).to receive(:cleanup_temp_file)
+
+      # Mock MIME type detection
+      mime_type = instance_double(MIME::Type)
+      allow(mime_type).to receive(:content_type).and_return("application/pdf")
+      allow(MIME::Types).to receive(:type_for).with(sample_file_path).and_return([mime_type])
+
       # Mock HTTP requests
       @mock_http = instance_double(Net::HTTP)
       allow(Net::HTTP).to receive(:new).and_return(@mock_http)
@@ -31,6 +45,17 @@ RSpec.describe CvParser::Providers::OpenAI do
     end
 
     context "with successful API response" do
+      let(:upload_response_body) do
+        { "id" => "file-abc123" }.to_json
+      end
+
+      let(:mock_upload_response) do
+        response = instance_double(Net::HTTPResponse)
+        allow(response).to receive(:code).and_return("200")
+        allow(response).to receive(:body).and_return(upload_response_body)
+        response
+      end
+
       let(:mock_response_body) do
         {
           "output" => [
@@ -55,25 +80,25 @@ RSpec.describe CvParser::Providers::OpenAI do
       end
 
       it "returns structured data from the API response" do
+        # First expect a file upload
+        expect(@mock_http).to receive(:request).and_return(mock_upload_response)
+
+        # Then expect a request to the Responses API
         expect(@mock_http).to receive(:request) do |request|
           # Verify the request body structure
           body = JSON.parse(request.body)
           expect(body["model"]).to eq("gpt-4o-mini")
-          expect(body["temperature"]).to eq(0.1)
-          expect(body["text"]["format"]["type"]).to eq("json_schema")
-          expect(body["text"]["format"]["name"]).to eq("cv_data_extraction")
-          expect(body["text"]["format"]).to have_key("schema")
-
-          # For text input, expect the new format
           expect(body["input"]).to be_an(Array)
           expect(body["input"].first["role"]).to eq("user")
           expect(body["input"].first["content"].first["type"]).to eq("input_text")
+          expect(body["input"].first["content"][1]["type"]).to eq("input_file")
+          expect(body["input"].first["content"][1]["file_id"]).to eq("file-abc123")
 
           mock_http_response
         end
 
         result = provider.extract_data(
-          content: sample_content,
+          file_path: sample_file_path,
           output_schema: output_schema
         )
 
@@ -87,6 +112,17 @@ RSpec.describe CvParser::Providers::OpenAI do
     end
 
     context "with API rate limit error" do
+      let(:upload_response_body) do
+        { "id" => "file-abc123" }.to_json
+      end
+
+      let(:mock_upload_response) do
+        response = instance_double(Net::HTTPResponse)
+        allow(response).to receive(:code).and_return("200")
+        allow(response).to receive(:body).and_return(upload_response_body)
+        response
+      end
+
       let(:rate_limit_response) do
         response = instance_double(Net::HTTPResponse)
         allow(response).to receive(:code).and_return("429")
@@ -95,11 +131,15 @@ RSpec.describe CvParser::Providers::OpenAI do
       end
 
       it "raises a RateLimitError" do
+        # First expect a file upload
+        expect(@mock_http).to receive(:request).and_return(mock_upload_response)
+
+        # Then expect a rate limit error
         expect(@mock_http).to receive(:request).and_return(rate_limit_response)
 
         expect do
           provider.extract_data(
-            content: sample_content,
+            file_path: sample_file_path,
             output_schema: output_schema
           )
         end.to raise_error(CvParser::RateLimitError, /OpenAI rate limit exceeded/)
@@ -107,6 +147,17 @@ RSpec.describe CvParser::Providers::OpenAI do
     end
 
     context "with other API error" do
+      let(:upload_response_body) do
+        { "id" => "file-abc123" }.to_json
+      end
+
+      let(:mock_upload_response) do
+        response = instance_double(Net::HTTPResponse)
+        allow(response).to receive(:code).and_return("200")
+        allow(response).to receive(:body).and_return(upload_response_body)
+        response
+      end
+
       let(:error_response) do
         response = instance_double(Net::HTTPResponse)
         allow(response).to receive(:code).and_return("400")
@@ -115,11 +166,15 @@ RSpec.describe CvParser::Providers::OpenAI do
       end
 
       it "raises an APIError" do
+        # First expect a file upload
+        expect(@mock_http).to receive(:request).and_return(mock_upload_response)
+
+        # Then expect an API error
         expect(@mock_http).to receive(:request).and_return(error_response)
 
         expect do
           provider.extract_data(
-            content: sample_content,
+            file_path: sample_file_path,
             output_schema: output_schema
           )
         end.to raise_error(CvParser::APIError, /OpenAI API client error/)
@@ -127,6 +182,17 @@ RSpec.describe CvParser::Providers::OpenAI do
     end
 
     context "with invalid JSON response" do
+      let(:upload_response_body) do
+        { "id" => "file-abc123" }.to_json
+      end
+
+      let(:mock_upload_response) do
+        response = instance_double(Net::HTTPResponse)
+        allow(response).to receive(:code).and_return("200")
+        allow(response).to receive(:body).and_return(upload_response_body)
+        response
+      end
+
       let(:invalid_json_response) do
         response = instance_double(Net::HTTPResponse)
         allow(response).to receive(:code).and_return("200")
@@ -135,11 +201,15 @@ RSpec.describe CvParser::Providers::OpenAI do
       end
 
       it "raises a ParseError" do
+        # First expect a file upload
+        expect(@mock_http).to receive(:request).and_return(mock_upload_response)
+
+        # Then expect a response with invalid JSON
         expect(@mock_http).to receive(:request).and_return(invalid_json_response)
 
         expect do
           provider.extract_data(
-            content: sample_content,
+            file_path: sample_file_path,
             output_schema: output_schema
           )
         end.to raise_error(CvParser::ParseError, /Failed to parse OpenAI response as JSON/)

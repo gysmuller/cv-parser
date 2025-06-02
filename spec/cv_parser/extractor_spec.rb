@@ -5,7 +5,8 @@ require "spec_helper"
 RSpec.describe CvParser::Extractor do
   let(:config) do
     CvParser.configure do |config|
-      config.configure_openai(access_token: "fake-api-key")
+      config.provider = :openai
+      config.api_key = "fake-api-key"
       config.model = "gpt-4o"
     end
     CvParser.configuration

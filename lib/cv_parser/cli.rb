@@ -85,7 +85,7 @@ module CvParser
       @parser = OptionParser.new do |opts|
         opts.banner = "Usage: cv-parser [options] <file>"
 
-        opts.on("-p", "--provider PROVIDER", "LLM Provider (openai or anthropic)") do |provider|
+        opts.on("-p", "--provider PROVIDER", "LLM Provider (openai, anthropic, or faker)") do |provider|
           @options[:provider] = provider.to_sym
         end
 
@@ -128,10 +128,20 @@ module CvParser
 
         # Try environment variables if not provided via options
         config.provider ||= (ENV["CV_PARSER_PROVIDER"]&.to_sym if ENV["CV_PARSER_PROVIDER"])
-        config.api_key ||= ENV["CV_PARSER_API_KEY"] || ENV["OPENAI_API_KEY"] || ENV.fetch("ANTHROPIC_API_KEY", nil)
 
-        # Default to OpenAI if nothing specified
-        config.provider ||= :openai
+        # Configure based on provider
+        case config.provider
+        when :openai
+          config.api_key ||= ENV["CV_PARSER_API_KEY"] || ENV.fetch("OPENAI_API_KEY", nil)
+        when :anthropic
+          config.api_key ||= ENV["CV_PARSER_API_KEY"] || ENV.fetch("ANTHROPIC_API_KEY", nil)
+        when :faker
+          config.api_key ||= "fake-api-key"
+        else
+          # Default to OpenAI if nothing specified
+          config.provider = :openai
+          config.api_key ||= ENV["CV_PARSER_API_KEY"] || ENV.fetch("OPENAI_API_KEY", nil)
+        end
       end
     end
 
