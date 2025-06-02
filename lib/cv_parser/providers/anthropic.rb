@@ -37,6 +37,9 @@ module CvParser
         pdf_content = File.read(processed_file_path)
         base64_encoded_pdf = Base64.strict_encode64(pdf_content)
 
+        # Create the extraction tool with the provided schema
+        extraction_tool = build_extraction_tool(output_schema)
+
         response = @client.post do |req|
           req.headers["Content-Type"] = "application/json"
           req.headers["x-api-key"] = @config.api_key
@@ -47,6 +50,8 @@ module CvParser
             max_tokens: MAX_TOKENS,
             temperature: TEMPERATURE,
             system: build_system_prompt,
+            tools: [extraction_tool],
+            tool_choice: { type: "tool", name: "extract_cv_data" },
             messages: [
               {
                 role: "user",
@@ -74,12 +79,87 @@ module CvParser
         # Clean up temporary PDF file if we created one
         cleanup_temp_file(processed_file_path, file_path)
 
-        handle_response(response, output_schema)
+        handle_tool_response(response, output_schema)
       rescue Faraday::Error => e
         raise APIError, "Anthropic API connection error: #{e.message}"
       end
 
       private
+
+      def build_extraction_tool(output_schema)
+        # Convert the schema to proper JSON Schema format if it's not already
+        json_schema = normalize_schema_to_json_schema(output_schema)
+
+        {
+          name: "extract_cv_data",
+          description: "Extract structured data from a CV/resume document according to the provided schema. Always use this tool to return the extracted data in the exact format specified by the schema.",
+          input_schema: json_schema
+        }
+      end
+
+      def normalize_schema_to_json_schema(schema)
+        # If it's already a proper JSON Schema (has type property), return as-is
+        return schema if schema.is_a?(Hash) && schema.key?("type")
+        return schema if schema.is_a?(Hash) && schema.key?(:type)
+
+        # Otherwise, convert our custom schema format to JSON Schema
+        {
+          type: "object",
+          properties: convert_properties(schema),
+          required: schema.keys.map(&:to_s)
+        }
+      end
+
+      def convert_properties(schema)
+        properties = {}
+
+        schema.each do |key, value|
+          property_name = key.to_s
+
+          properties[property_name] = case value
+                                      when String
+                                        if value == "string"
+                                          { type: "string" }
+                                        else
+                                          # Treat as a string literal or description
+                                          { type: "string", description: value }
+                                        end
+                                      when Array
+                                        if value.length == 1 && value[0].is_a?(Hash)
+                                          # Array of objects
+                                          {
+                                            type: "array",
+                                            items: {
+                                              type: "object",
+                                              properties: convert_properties(value[0]),
+                                              required: value[0].keys.map(&:to_s)
+                                            }
+                                          }
+                                        elsif value.length == 1 && value[0] == "string"
+                                          # Array of strings
+                                          {
+                                            type: "array",
+                                            items: { type: "string" }
+                                          }
+                                        else
+                                          # Generic array
+                                          { type: "array" }
+                                        end
+                                      when Hash
+                                        # Nested object
+                                        {
+                                          type: "object",
+                                          properties: convert_properties(value),
+                                          required: value.keys.map(&:to_s)
+                                        }
+                                      else
+                                        # Default to string
+                                        { type: "string" }
+                                      end
+        end
+
+        properties
+      end
 
       def convert_to_pdf_if_needed(file_path)
         file_ext = File.extname(file_path).downcase
@@ -125,33 +205,28 @@ module CvParser
         end
       end
 
-      def handle_response(response, _schema)
+      def handle_tool_response(response, _schema)
         if response.status == 200
           response_body = response.body
           content = response_body["content"]
 
-          # Improved content handling for different content structures
           raise ParseError, "Unexpected Anthropic response format: content is not an array" unless content.is_a?(Array)
 
-          # Search for text content in the array
-          text_content = nil
-          content.each do |item|
-            if item["type"] == "text" && item["text"]
-              text_content = item["text"]
-              break
-            end
+          # Look for the tool_use block in the response
+          tool_use_block = content.find { |block| block["type"] == "tool_use" }
+
+          raise ParseError, "No tool_use block found in Claude's response" unless tool_use_block
+
+          unless tool_use_block["name"] == "extract_cv_data"
+            raise ParseError, "Unexpected tool used: #{tool_use_block["name"]}"
           end
 
-          raise ParseError, "No text content found in Claude's response" unless text_content
+          # The tool input should already be structured according to our schema
+          extracted_data = tool_use_block["input"]
 
-          begin
-            # Clean the text content to remove markdown formatting if present
-            cleaned_text = text_content.strip
-            cleaned_text = cleaned_text.gsub(/^```json\s*/, "").gsub(/\s*```$/, "")
-            JSON.parse(cleaned_text)
-          rescue JSON::ParserError => e
-            raise ParseError, "Failed to parse Claude's response as JSON: #{e.message}"
-          end
+          raise ParseError, "Tool input is not a hash/object as expected" unless extracted_data.is_a?(Hash)
+
+          extracted_data
 
         elsif response.status == 429
           retry_after = response.headers["retry-after"]
