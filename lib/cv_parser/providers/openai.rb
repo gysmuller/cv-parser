@@ -16,6 +16,22 @@ module CvParser
       API_RESPONSES_URL = "https://api.openai.com/v1/responses"
       DEFAULT_MODEL = "gpt-4.1-mini"
 
+      # HTTP Status codes
+      HTTP_OK = 200
+      HTTP_BAD_REQUEST = 400
+      HTTP_UNAUTHORIZED = 401
+      HTTP_TOO_MANY_REQUESTS = 429
+      HTTP_CLIENT_ERROR_START = 400
+      HTTP_CLIENT_ERROR_END = 499
+      HTTP_SERVER_ERROR_START = 500
+      HTTP_SERVER_ERROR_END = 599
+
+      # Constants
+      SCHEMA_NAME = "cv_data_extraction"
+      FILE_PURPOSE = "assistants"
+      MULTIPART_BOUNDARY_PREFIX = "----cv-parser-"
+      DEFAULT_MIME_TYPE = "application/octet-stream"
+
       def initialize(config)
         super
         @api_key = @config.api_key
@@ -24,29 +40,14 @@ module CvParser
       end
 
       def extract_data(output_schema:, file_path: nil)
-        raise ArgumentError, "File_path must be provided" unless file_path
+        validate_inputs!(output_schema, file_path)
 
-        # Validate that we have a proper JSON Schema format
-        unless output_schema.is_a?(Hash) &&
-               ((output_schema.key?("type") && output_schema["type"] == "json_schema") ||
-                (output_schema.key?(:type) && output_schema[:type] == "json_schema"))
-          raise ArgumentError, "The OpenAI provider requires a JSON Schema format with 'type: \"json_schema\"'"
-        end
-
-        # File upload approach using Responses API
-        validate_file_exists!(file_path)
-        validate_file_readable!(file_path)
-
-        # Convert DOCX to PDF if necessary
-        processed_file_path = convert_to_pdf_if_needed(file_path)
-
+        processed_file_path = prepare_file(file_path)
         file_id = upload_file(processed_file_path)
         response = create_response_with_file(file_id, output_schema)
 
-        # Clean up temporary PDF file if we created one
         cleanup_temp_file(processed_file_path, file_path)
 
-        # Parse the response from the Responses API
         parse_response_output(response)
       rescue Timeout::Error => e
         raise APIError, "OpenAI API timeout: #{e.message}"
@@ -58,34 +59,73 @@ module CvParser
 
       def upload_file(file_path)
         uri = URI(API_FILE_URL)
+        file_content, mime_type, filename = prepare_file_upload_data(file_path)
 
-        # Read file content and determine MIME type
-        file_content = File.read(file_path, mode: "rb")
-        mime_type = MIME::Types.type_for(file_path).first&.content_type || "application/octet-stream"
-        filename = File.basename(file_path)
-
-        # Create multipart form data
-        boundary = "----cv-parser-#{SecureRandom.hex(16)}"
+        boundary = generate_boundary
         form_data = build_multipart_form_data(file_content, filename, mime_type, boundary)
 
-        request = Net::HTTP::Post.new(uri)
-        request.body = form_data
-        request["Content-Type"] = "multipart/form-data; boundary=#{boundary}"
-        @base_headers.each { |key, value| request[key] = value }
-
+        request = build_upload_request(uri, form_data, boundary)
         response = make_http_request(uri, request)
 
-        if response.code.to_i == 200
-          result = JSON.parse(response.body)
-          result["id"]
-        else
-          handle_error_response(response, "file upload")
-        end
+        handle_upload_response(response)
       rescue StandardError => e
         raise APIError, "OpenAI API error during file upload: #{e.message}"
       end
 
       private
+
+      def validate_inputs!(output_schema, file_path)
+        raise ArgumentError, "File_path must be provided" unless file_path
+
+        validate_schema_format!(output_schema)
+        validate_file_exists!(file_path)
+        validate_file_readable!(file_path)
+      end
+
+      def validate_schema_format!(output_schema)
+        return if valid_json_schema_format?(output_schema)
+
+        raise ArgumentError, "The OpenAI provider requires a JSON Schema format with 'type: \"json_schema\"'"
+      end
+
+      def valid_json_schema_format?(schema)
+        schema.is_a?(Hash) &&
+          ((schema.key?("type") && schema["type"] == "json_schema") ||
+           (schema.key?(:type) && schema[:type] == "json_schema"))
+      end
+
+      def prepare_file(file_path)
+        convert_to_pdf_if_needed(file_path)
+      end
+
+      def prepare_file_upload_data(file_path)
+        file_content = File.read(file_path, mode: "rb")
+        mime_type = MIME::Types.type_for(file_path).first&.content_type || DEFAULT_MIME_TYPE
+        filename = File.basename(file_path)
+
+        [file_content, mime_type, filename]
+      end
+
+      def generate_boundary
+        "#{MULTIPART_BOUNDARY_PREFIX}#{SecureRandom.hex(16)}"
+      end
+
+      def build_upload_request(uri, form_data, boundary)
+        request = Net::HTTP::Post.new(uri)
+        request.body = form_data
+        request["Content-Type"] = "multipart/form-data; boundary=#{boundary}"
+        @base_headers.each { |key, value| request[key] = value }
+        request
+      end
+
+      def handle_upload_response(response)
+        if response.code.to_i == HTTP_OK
+          result = JSON.parse(response.body)
+          result["id"]
+        else
+          handle_error_response(response, "file upload")
+        end
+      end
 
       def setup_client
         {
@@ -97,97 +137,113 @@ module CvParser
 
       def create_response_with_file(file_id, schema)
         uri = URI(API_RESPONSES_URL)
+        payload = build_response_payload(file_id, schema)
+        make_responses_api_request(uri, payload)
+      end
 
-        payload = {
+      def build_response_payload(file_id, schema)
+        {
           model: @config.model || DEFAULT_MODEL,
           input: build_file_input_for_responses_api(file_id),
           text: {
             format: {
               type: "json_schema",
-              name: "cv_data_extraction",
+              name: SCHEMA_NAME,
               schema: schema_to_json_schema(schema)
             }
           }
         }
-
-        make_responses_api_request(uri, payload)
       end
 
       def schema_to_json_schema(schema)
-        # If it's already a proper JSON Schema format, extract the schema part
-        if schema.is_a?(Hash) && schema.key?("type") && schema["type"] == "json_schema"
-          # Extract the properties from the JSON Schema format and ensure additionalProperties is set
-          properties = schema["properties"] || {}
-          processed_properties = ensure_additional_properties(properties)
-          return {
-            type: "object",
-            properties: processed_properties,
-            required: processed_properties.keys,
-            additionalProperties: false
-          }
-        elsif schema.is_a?(Hash) && schema.key?(:type) && schema[:type] == "json_schema"
-          # Handle symbol keys
-          properties = schema[:properties] || {}
-          processed_properties = ensure_additional_properties(properties)
-          return {
-            type: "object",
-            properties: processed_properties,
-            required: processed_properties.keys,
-            additionalProperties: false
-          }
-        end
+        properties = extract_properties_from_schema(schema)
+        processed_properties = ensure_additional_properties(properties)
 
-        # If we get here, the schema is not in the expected format
-        raise ArgumentError, "Invalid schema format. Please use JSON Schema format with 'type: \"json_schema\"'"
+        {
+          type: "object",
+          properties: processed_properties,
+          required: processed_properties.keys,
+          additionalProperties: false
+        }
+      end
+
+      def extract_properties_from_schema(schema)
+        if schema.key?("properties")
+          schema["properties"]
+        elsif schema.key?(:properties)
+          schema[:properties]
+        else
+          raise ArgumentError, "Invalid schema format. Please use JSON Schema format with 'type: \"json_schema\"'"
+        end
       end
 
       def ensure_additional_properties(properties)
         result = {}
         properties.each do |key, value|
-          if value.is_a?(Hash)
-            if value["type"] == "object" || value[:type] == "object"
-              # Ensure object types have additionalProperties set to false and all properties are required
-              nested_props = value["properties"] || value[:properties] || {}
-              processed_nested_props = ensure_additional_properties(nested_props)
-              result[key] = value.merge(
-                additionalProperties: false,
-                properties: processed_nested_props,
-                required: processed_nested_props.keys
-              )
-            elsif value["type"] == "array" || value[:type] == "array"
-              # Handle array items
-              items = value["items"] || value[:items]
-              if items.is_a?(Hash) && (items["type"] == "object" || items[:type] == "object")
-                nested_props = items["properties"] || items[:properties] || {}
-                processed_nested_props = ensure_additional_properties(nested_props)
-                updated_items = items.merge(
-                  additionalProperties: false,
-                  properties: processed_nested_props,
-                  required: processed_nested_props.keys
-                )
-                result[key] = value.merge(items: updated_items)
-              else
-                result[key] = value
-              end
-            else
-              result[key] = value
-            end
-          else
-            result[key] = value
-          end
+          result[key] = process_property_value(value)
         end
         result
       end
 
+      def process_property_value(value)
+        return value unless value.is_a?(Hash)
+
+        case property_type(value)
+        when "object"
+          process_object_property(value)
+        when "array"
+          process_array_property(value)
+        else
+          value
+        end
+      end
+
+      def property_type(value)
+        value["type"] || value[:type]
+      end
+
+      def process_object_property(value)
+        nested_props = value["properties"] || value[:properties] || {}
+        processed_nested_props = ensure_additional_properties(nested_props)
+
+        value.merge(
+          additionalProperties: false,
+          properties: processed_nested_props,
+          required: processed_nested_props.keys
+        )
+      end
+
+      def process_array_property(value)
+        items = value["items"] || value[:items]
+        return value unless items.is_a?(Hash) && property_type(items) == "object"
+
+        nested_props = items["properties"] || items[:properties] || {}
+        processed_nested_props = ensure_additional_properties(nested_props)
+        updated_items = items.merge(
+          additionalProperties: false,
+          properties: processed_nested_props,
+          required: processed_nested_props.keys
+        )
+
+        value.merge(items: updated_items)
+      end
+
       def make_responses_api_request(uri, payload)
+        request = build_json_request(uri, payload)
+        response = make_http_request(uri, request)
+        handle_responses_api_response(response)
+      end
+
+      def build_json_request(uri, payload)
         request = Net::HTTP::Post.new(uri)
         request.body = payload.to_json
         request["Content-Type"] = "application/json"
         @base_headers.each { |key, value| request[key] = value }
+        request
+      end
 
-        response = make_http_request(uri, request)
-
-        if response.code.to_i == 200
+      def handle_responses_api_response(response)
+        if response.code.to_i == HTTP_OK
           JSON.parse(response.body)
         else
           handle_error_response(response, "responses API")
@@ -265,55 +321,67 @@ module CvParser
       end
 
       def handle_error_response(response, context)
-        error_body = response.body
-        error_info = begin
-          JSON.parse(error_body)
-        rescue JSON::ParserError
-          { "error" => { "message" => error_body } }
-        end
-
+        error_info = parse_error_body(response.body)
         error_message = error_info.dig("error", "message") || "Unknown error"
+        status_code = response.code.to_i
 
-        case response.code.to_i
-        when 429
+        case status_code
+        when HTTP_TOO_MANY_REQUESTS
           raise RateLimitError, "OpenAI rate limit exceeded during #{context}: #{error_message}"
-        when 400..499
-          raise APIError, "OpenAI API client error during #{context} (#{response.code}): #{error_message}"
-        when 500..599
-          raise APIError, "OpenAI API server error during #{context} (#{response.code}): #{error_message}"
+        when HTTP_CLIENT_ERROR_START..HTTP_CLIENT_ERROR_END
+          raise APIError, "OpenAI API client error during #{context} (#{status_code}): #{error_message}"
+        when HTTP_SERVER_ERROR_START..HTTP_SERVER_ERROR_END
+          raise APIError, "OpenAI API server error during #{context} (#{status_code}): #{error_message}"
         else
-          raise APIError, "OpenAI API error during #{context} (#{response.code}): #{error_message}"
+          raise APIError, "OpenAI API error during #{context} (#{status_code}): #{error_message}"
         end
       end
 
+      def parse_error_body(error_body)
+        JSON.parse(error_body)
+      rescue JSON::ParserError
+        { "error" => { "message" => error_body } }
+      end
+
       def handle_http_error(error)
-        if error.message.include?("rate limit") || error.message.include?("429")
-          raise RateLimitError, "OpenAI rate limit exceeded: #{error.message}"
-        end
+        raise RateLimitError, "OpenAI rate limit exceeded: #{error.message}" if rate_limit_error?(error)
 
         raise APIError, "OpenAI API error: #{error.message}"
       end
 
+      def rate_limit_error?(error)
+        error.message.include?("rate limit") || error.message.include?("429")
+      end
+
       def build_multipart_form_data(file_content, filename, mime_type, boundary)
         form_data = ""
-
-        # Add file field
-        form_data += "--#{boundary}\r\n"
-        form_data += "Content-Disposition: form-data; name=\"file\"; filename=\"#{filename}\"\r\n"
-        form_data += "Content-Type: #{mime_type}\r\n\r\n"
-        form_data += file_content
-        form_data += "\r\n"
-
-        # Add purpose field
-        form_data += "--#{boundary}\r\n"
-        form_data += "Content-Disposition: form-data; name=\"purpose\"\r\n\r\n"
-        form_data += "assistants"
-        form_data += "\r\n"
-
-        # End boundary
-        form_data += "--#{boundary}--\r\n"
-
+        form_data += build_file_field(file_content, filename, mime_type, boundary)
+        form_data += build_purpose_field(boundary)
+        form_data += build_end_boundary(boundary)
         form_data
+      end
+
+      def build_file_field(file_content, filename, mime_type, boundary)
+        field = ""
+        field += "--#{boundary}\r\n"
+        field += "Content-Disposition: form-data; name=\"file\"; filename=\"#{filename}\"\r\n"
+        field += "Content-Type: #{mime_type}\r\n\r\n"
+        field += file_content
+        field += "\r\n"
+        field
+      end
+
+      def build_purpose_field(boundary)
+        field = ""
+        field += "--#{boundary}\r\n"
+        field += "Content-Disposition: form-data; name=\"purpose\"\r\n\r\n"
+        field += FILE_PURPOSE
+        field += "\r\n"
+        field
+      end
+
+      def build_end_boundary(boundary)
+        "--#{boundary}--\r\n"
       end
 
       protected

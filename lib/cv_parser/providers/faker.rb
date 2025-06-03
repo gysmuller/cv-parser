@@ -5,26 +5,29 @@ require "securerandom"
 module CvParser
   module Providers
     class Faker < Base
-      def initialize(config)
-        super
-        @skills = ["Ruby", "JavaScript", "Python", "React", "Java", "C#", "PHP", "Go", "Swift", "Kotlin"]
-        @job_titles = ["Software Engineer", "Full Stack Developer", "DevOps Engineer", "Data Scientist",
-                       "Product Manager", "UX Designer", "Frontend Developer", "Backend Developer"]
-        @companies = %w[Google Microsoft Amazon Facebook Apple Netflix Tesla Airbnb]
-        @universities = ["Stanford University", "MIT", "Harvard", "Berkeley", "Oxford", "Cambridge"]
-        @degrees = ["Bachelor of Science", "Master of Science", "PhD", "MBA"]
-        @majors = ["Computer Science", "Software Engineering", "Electrical Engineering", "Data Science"]
-      end
+      # Sample data constants
+      SKILLS = ["Ruby", "JavaScript", "Python", "React", "Java", "C#", "PHP", "Go", "Swift", "Kotlin"].freeze
+      JOB_TITLES = ["Software Engineer", "Full Stack Developer", "DevOps Engineer", "Data Scientist",
+                    "Product Manager", "UX Designer", "Frontend Developer", "Backend Developer"].freeze
+      COMPANIES = %w[Google Microsoft Amazon Facebook Apple Netflix Tesla Airbnb].freeze
+      UNIVERSITIES = ["Stanford University", "MIT", "Harvard", "Berkeley", "Oxford", "Cambridge"].freeze
+      DEGREES = ["Bachelor of Science", "Master of Science", "PhD", "MBA"].freeze
+      MAJORS = ["Computer Science", "Software Engineering", "Electrical Engineering", "Data Science"].freeze
+      LANGUAGES = %w[English Spanish French German Mandarin].freeze
+
+      # Date ranges
+      START_YEAR_RANGE = (2010..2020).freeze
+      END_YEAR_RANGE = (2015..2022).freeze
+      GENERAL_YEAR_RANGE = (2010..2023).freeze
+
+      # Array size range
+      ARRAY_SIZE_RANGE = (1..3).freeze
+
+      # Schema types
+      JSON_SCHEMA_TYPE = "json_schema"
 
       def extract_data(output_schema:, file_path: nil)
-        # Validate that we have a proper JSON Schema format
-        unless output_schema.is_a?(Hash) &&
-               ((output_schema.key?("type") && output_schema["type"] == "json_schema") ||
-                (output_schema.key?(:type) && output_schema[:type] == "json_schema"))
-          raise ArgumentError, "The Faker provider requires a JSON Schema format with 'type: \"json_schema\"'"
-        end
-
-        # Generate fake data based on the provided schema
+        validate_schema_format!(output_schema)
         generate_fake_data(output_schema)
       end
 
@@ -35,30 +38,54 @@ module CvParser
 
       private
 
-      def generate_fake_data(schema)
-        # Handle JSON Schema format
-        if schema.is_a?(Hash) &&
-           ((schema.key?("type") && schema["type"] == "json_schema") ||
-            (schema.key?(:type) && schema[:type] == "json_schema"))
-          # Extract properties from JSON Schema format
-          properties = schema["properties"] || schema[:properties] || {}
-          generate_fake_data_from_properties(properties)
-        elsif schema.is_a?(Hash)
-          result = {}
-          schema.each do |key, type|
-            result[key.to_s] = generate_value_for_type(type, key)
-          end
-          result
-        elsif schema.is_a?(Array) && !schema.empty?
-          # For arrays, generate 1-3 items of the array's first element type
-          count = rand(1..3)
-          Array.new(count) { generate_fake_data(schema.first) }
-        else
-          "fake-value"
-        end
+      def validate_schema_format!(output_schema)
+        return if valid_json_schema_format?(output_schema)
+
+        raise ArgumentError, "The Faker provider requires a JSON Schema format with 'type: \"json_schema\"'"
       end
 
-      # Helper method to generate fake data from schema properties
+      def valid_json_schema_format?(schema)
+        schema.is_a?(Hash) &&
+          ((schema.key?("type") && schema["type"] == JSON_SCHEMA_TYPE) ||
+           (schema.key?(:type) && schema[:type] == JSON_SCHEMA_TYPE))
+      end
+
+      def generate_fake_data(schema)
+        return generate_fake_data_from_json_schema(schema) if json_schema_format?(schema)
+        return generate_fake_data_from_hash(schema) if schema.is_a?(Hash)
+        return generate_fake_data_from_array(schema) if schema.is_a?(Array) && !schema.empty?
+
+        "fake-value"
+      end
+
+      def json_schema_format?(schema)
+        schema.is_a?(Hash) &&
+          ((schema.key?("type") && schema["type"] == JSON_SCHEMA_TYPE) ||
+           (schema.key?(:type) && schema[:type] == JSON_SCHEMA_TYPE))
+      end
+
+      def generate_fake_data_from_json_schema(schema)
+        properties = extract_properties_from_schema(schema)
+        generate_fake_data_from_properties(properties)
+      end
+
+      def extract_properties_from_schema(schema)
+        schema["properties"] || schema[:properties] || {}
+      end
+
+      def generate_fake_data_from_hash(schema)
+        result = {}
+        schema.each do |key, type|
+          result[key.to_s] = generate_value_for_type(type, key)
+        end
+        result
+      end
+
+      def generate_fake_data_from_array(schema)
+        count = rand(ARRAY_SIZE_RANGE)
+        Array.new(count) { generate_fake_data(schema.first) }
+      end
+
       def generate_fake_data_from_properties(properties)
         result = {}
         properties.each do |key, type|
@@ -68,90 +95,120 @@ module CvParser
       end
 
       def generate_value_for_type(type, key)
-        # Handle JSON Schema property definitions
-        if type.is_a?(Hash) && type.key?("type")
-          case type["type"]
-          when "object"
-            generate_fake_data(type["properties"] || {})
-          when "array"
-            count = rand(1..3)
-            Array.new(count) { generate_value_for_type(type["items"], key) }
-          when "string"
-            generate_string_value(key, type["description"])
-          when "number", "integer"
-            rand(1..100)
-          when "boolean"
-            [true, false].sample
-          else
-            "fake-value"
-          end
-        elsif type.is_a?(Hash) && type.key?(:type)
-          # Handle symbol keys
-          case type[:type]
-          when "object"
-            generate_fake_data(type[:properties] || {})
-          when "array"
-            count = rand(1..3)
-            Array.new(count) { generate_value_for_type(type[:items], key) }
-          when "string"
-            generate_string_value(key, type[:description])
-          when "number", "integer"
-            rand(1..100)
-          when "boolean"
-            [true, false].sample
-          else
-            "fake-value"
-          end
-        elsif type.is_a?(Hash)
-          generate_fake_data(type)
-        elsif type.is_a?(Array)
-          count = rand(1..3)
-          Array.new(count) { generate_fake_data(type.first) }
+        return generate_value_from_typed_hash(type, key) if typed_hash?(type)
+        return generate_fake_data(type) if type.is_a?(Hash)
+        return generate_fake_data_from_array(type) if type.is_a?(Array)
+
+        generate_string_value(key, nil)
+      end
+
+      def typed_hash?(type)
+        type.is_a?(Hash) && (type.key?("type") || type.key?(:type))
+      end
+
+      def generate_value_from_typed_hash(type, key)
+        schema_type = type["type"] || type[:type]
+        description = type["description"] || type[:description]
+
+        case schema_type
+        when "object"
+          properties = type["properties"] || type[:properties] || {}
+          generate_fake_data(properties)
+        when "array"
+          items = type["items"] || type[:items]
+          count = rand(ARRAY_SIZE_RANGE)
+          Array.new(count) { generate_value_for_type(items, key) }
+        when "string"
+          generate_string_value(key, description)
+        when "number", "integer"
+          rand(1..100)
+        when "boolean"
+          [true, false].sample
         else
-          generate_string_value(key, nil)
+          "fake-value"
         end
       end
 
       def generate_string_value(key, description = nil)
-        # Handle primitive types based on key name semantics
-        case key.to_s.downcase
+        key_string = key.to_s.downcase
+
+        case key_string
         when /name/
-          "John Doe"
+          generate_name_value
         when /email/
-          "john.doe@example.com"
+          generate_email_value
         when /phone/
-          "+1 (555) 123-4567"
+          generate_phone_value
         when /address/
-          "123 Main St, Anytown, CA 94088"
+          generate_address_value
         when /summary/, /objective/, /description/
-          "Lorem ipsum dolor sit amet, consectetur adipiscing elit."
+          generate_description_value
         when /skill/
-          @skills.sample
+          SKILLS.sample
         when /title/, /position/, /role/
-          @job_titles.sample
+          JOB_TITLES.sample
         when /company/, /employer/, /organization/
-          @companies.sample
+          COMPANIES.sample
         when /university/, /school/, /college/
-          @universities.sample
+          UNIVERSITIES.sample
         when /degree/
-          @degrees.sample
+          DEGREES.sample
         when /major/, /field/
-          @majors.sample
+          MAJORS.sample
         when /year/, /years/
-          rand(1..10).to_s
+          generate_years_value
         when /start_date/, /start/
-          "#{rand(2010..2020)}-#{format("%02d", rand(1..12))}-#{format("%02d", rand(1..28))}"
+          generate_date_value(START_YEAR_RANGE)
         when /end_date/, /end/
-          "#{rand(2015..2022)}-#{format("%02d", rand(1..12))}-#{format("%02d", rand(1..28))}"
+          generate_date_value(END_YEAR_RANGE)
         when /date/
-          "#{rand(2010..2023)}-#{format("%02d", rand(1..12))}-#{format("%02d", rand(1..28))}"
+          generate_date_value(GENERAL_YEAR_RANGE)
         when /url/, /website/, /link/
-          "https://www.example.com"
+          generate_url_value
         when /language/
-          %w[English Spanish French German Mandarin].sample
+          LANGUAGES.sample
         else
-          "fake-#{key}-#{SecureRandom.hex(4)}"
+          generate_default_value(key)
         end
+      end
+
+      def generate_name_value
+        "John Doe"
+      end
+
+      def generate_email_value
+        "john.doe@example.com"
+      end
+
+      def generate_phone_value
+        "+1 (555) 123-4567"
+      end
+
+      def generate_address_value
+        "123 Main St, Anytown, CA 94088"
+      end
+
+      def generate_description_value
+        "Lorem ipsum dolor sit amet, consectetur adipiscing elit."
+      end
+
+      def generate_years_value
+        rand(1..10).to_s
+      end
+
+      def generate_date_value(year_range)
+        year = rand(year_range)
+        month = format("%02d", rand(1..12))
+        day = format("%02d", rand(1..28))
+        "#{year}-#{month}-#{day}"
+      end
+
+      def generate_url_value
+        "https://www.example.com"
+      end
+
+      def generate_default_value(key)
+        "fake-#{key}-#{SecureRandom.hex(4)}"
       end
     end
   end
