@@ -6,6 +6,7 @@ Gem::Specification.new do |spec|
   spec.name = "cv-parser"
   spec.version = CvParser::VERSION
   spec.authors = ["Gys Muller"]
+  spec.email = ["gysmuller@users.noreply.github.com"]
 
   spec.summary = "A Ruby gem for parsing CVs/resumes using LLMs"
   spec.description = "CV Parser is a Ruby gem that extracts structured information from CVs and resumes in various formats using LLMs."
@@ -34,10 +35,5 @@ Gem::Specification.new do |spec|
   spec.add_dependency "rexml", "~> 3.2"           # XML parsing for DOCX conversion
   spec.add_dependency "zlib", "~> 3.0"            # Compression support for DOCX conversion
 
-  # Development dependencies
-  spec.add_development_dependency "rake", "~> 13.0"
-  spec.add_development_dependency "rspec", "~> 3.12"
-  spec.add_development_dependency "rubocop", "~> 1.57"
-  spec.add_development_dependency "webmock", "~> 3.18"
   spec.metadata["rubygems_mfa_required"] = "true"
 end
