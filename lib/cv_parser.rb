@@ -10,6 +10,7 @@ require_relative "cv_parser/providers/faker"
 require_relative "cv_parser/extractor"
 require_relative "cv_parser/cli"
 
+# A Ruby gem for parsing CVs and resumes using AI providers
 module CvParser
   class << self
     def configuration
@@ -17,12 +18,7 @@ module CvParser
     end
 
     def configure
-      if block_given?
-        yield(configuration)
-        # The block is expected to create a new Configuration and assign it
-        # to @configuration via instance_variable_set, but if not, we can
-        # still use the default configuration initialized above
-      end
+      yield(configuration) if block_given?
       configuration
     end
 
@@ -32,6 +28,4 @@ module CvParser
   end
 
   class Error < StandardError; end
-
-  # Your code goes here...
 end

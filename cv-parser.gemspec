@@ -26,8 +26,8 @@ Gem::Specification.new do |spec|
 
   # Dependencies
   spec.add_dependency "base64", "~> 0.2"          # Required for Ruby 3.4+ compatibility
-  spec.add_dependency "faraday", "~> 2.0"         # HTTP client for Anthropic
-  spec.add_dependency "faraday-multipart", "~> 1.0" # Multipart form support for file uploads
+  spec.add_dependency "faraday", ">= 1.0"         # HTTP client for Anthropic and OpenAI
+  spec.add_dependency "faraday-multipart", ">= 1.0" # Multipart form support for file uploads
   spec.add_dependency "fiddle", "~> 1.1"          # Required for Ruby 3.5+ compatibility
   spec.add_dependency "json", "~> 2.6"            # JSON handling for CLI output
   spec.add_dependency "mime-types", "~> 3.5"      # MIME type detection for file uploads
