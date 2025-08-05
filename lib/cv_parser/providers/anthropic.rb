@@ -30,19 +30,28 @@ module CvParser
       def extract_data(output_schema:, file_path: nil)
         validate_inputs!(output_schema, file_path)
 
-        processed_file_path = prepare_file(file_path)
-        base64_content = encode_file_to_base64(processed_file_path)
-
-        response = make_api_request(output_schema, base64_content)
-
-        cleanup_temp_file(processed_file_path, file_path)
-
+        response = process_file_and_get_response(file_path, output_schema)
         handle_tool_response(response, output_schema)
       rescue Faraday::Error => e
         raise APIError, "Anthropic API connection error: #{e.message}"
       end
 
       private
+
+      def process_file_and_get_response(file_path, output_schema)
+        if text_file?(file_path)
+          # Handle text files without base64 encoding
+          text_content = read_text_file_content(file_path)
+          make_api_request_with_text(output_schema, text_content)
+        else
+          # Existing file processing logic
+          processed_file_path = prepare_file(file_path)
+          base64_content = encode_file_to_base64(processed_file_path)
+          response = make_api_request(output_schema, base64_content)
+          cleanup_temp_file(processed_file_path, file_path)
+          response
+        end
+      end
 
       def validate_inputs!(output_schema, file_path)
         raise ArgumentError, "File_path must be provided" unless file_path
@@ -119,6 +128,39 @@ module CvParser
         {
           type: "text",
           text: build_extraction_prompt(output_schema)
+        }
+      end
+
+      def make_api_request_with_text(output_schema, text_content)
+        extraction_tool = build_extraction_tool(output_schema)
+
+        @client.post do |req|
+          req.headers["Content-Type"] = "application/json"
+          req.body = build_text_request_body(output_schema, extraction_tool, text_content).to_json
+        end
+      end
+
+      def build_text_request_body(output_schema, extraction_tool, text_content)
+        {
+          model: @config.model || DEFAULT_MODEL,
+          max_tokens: @config.max_tokens,
+          temperature: @config.temperature,
+          system: build_system_prompt,
+          tools: [extraction_tool],
+          tool_choice: { type: "tool", name: TOOL_NAME },
+          messages: [build_text_message(output_schema, text_content)]
+        }
+      end
+
+      def build_text_message(output_schema, text_content)
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: "#{build_extraction_prompt(output_schema)}\n\nCV Content:\n#{text_content}"
+            }
+          ]
         }
       end
 

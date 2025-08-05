@@ -105,4 +105,77 @@ RSpec.describe CvParser::Providers::Faker do
       expect(result[:id]).to start_with("fake-file-")
     end
   end
+
+  describe "#extract_data with text files" do
+    let(:txt_file_path) { fixture_path("sample_resume.txt") }
+    let(:md_file_path) { fixture_path("sample_resume.md") }
+    let(:empty_file_path) { fixture_path("empty_resume.txt") }
+    let(:output_schema) do
+      {
+        type: "json_schema",
+        properties: {
+          contact_information: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              email: { type: "string" }
+            }
+          }
+        }
+      }
+    end
+
+    before do
+      allow(File).to receive(:exist?).with(txt_file_path).and_return(true)
+      allow(File).to receive(:readable?).with(txt_file_path).and_return(true)
+      allow(File).to receive(:exist?).with(md_file_path).and_return(true)
+      allow(File).to receive(:readable?).with(md_file_path).and_return(true)
+    end
+
+    context "with valid text files" do
+      it "validates and processes txt files" do
+        result = provider.extract_data(output_schema: output_schema, file_path: txt_file_path)
+
+        expect(result).to be_a(Hash)
+        expect(result).to include("contact_information")
+        expect(result["contact_information"]).to include("name")
+      end
+
+      it "validates and processes markdown files" do
+        result = provider.extract_data(output_schema: output_schema, file_path: md_file_path)
+
+        expect(result).to be_a(Hash)
+        expect(result).to include("contact_information")
+      end
+
+      it "works without file_path" do
+        result = provider.extract_data(output_schema: output_schema)
+
+        expect(result).to be_a(Hash)
+      end
+    end
+
+    context "with empty text file" do
+      before do
+        allow(File).to receive(:exist?).with(empty_file_path).and_return(true)
+        allow(File).to receive(:readable?).with(empty_file_path).and_return(true)
+      end
+
+      it "raises EmptyTextFileError" do
+        expect do
+          provider.extract_data(output_schema: output_schema, file_path: empty_file_path)
+        end.to raise_error(CvParser::EmptyTextFileError)
+      end
+    end
+
+    context "with non-existent file" do
+      it "raises FileNotFoundError" do
+        allow(File).to receive(:exist?).with("non_existent.txt").and_return(false)
+
+        expect do
+          provider.extract_data(output_schema: output_schema, file_path: "non_existent.txt")
+        end.to raise_error(CvParser::FileNotFoundError)
+      end
+    end
+  end
 end

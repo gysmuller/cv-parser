@@ -2,6 +2,8 @@
 
 require "spec_helper"
 
+# rubocop:disable Metrics/BlockLength
+
 RSpec.describe CvParser::Providers::OpenAI do
   let(:config) do
     config = CvParser::Configuration.new
@@ -236,6 +238,7 @@ RSpec.describe CvParser::Providers::OpenAI do
     before do
       # Mock file operations
       allow(File).to receive(:read).with(file_path, mode: "rb").and_return(file_content)
+      allow(File).to receive(:basename).and_call_original
       allow(File).to receive(:basename).with(file_path).and_return("test.pdf")
       allow(provider).to receive(:validate_file_exists!)
       allow(provider).to receive(:validate_file_readable!)
@@ -290,4 +293,88 @@ RSpec.describe CvParser::Providers::OpenAI do
       end
     end
   end
+
+  describe "#extract_data with text files" do
+    let(:txt_file_path) { fixture_path("sample_resume.txt") }
+    let(:md_file_path) { fixture_path("sample_resume.md") }
+    let(:empty_file_path) { fixture_path("empty_resume.txt") }
+
+    before do
+      allow(File).to receive(:exist?).with(txt_file_path).and_return(true)
+      allow(File).to receive(:readable?).with(txt_file_path).and_return(true)
+      allow(File).to receive(:exist?).with(md_file_path).and_return(true)
+      allow(File).to receive(:readable?).with(md_file_path).and_return(true)
+    end
+
+    context "with successful text processing" do
+      it "processes txt files without file upload" do
+        response_body = {
+          "output" => [
+            {
+              "type" => "message",
+              "content" => [
+                {
+                  "type" => "text",
+                  "text" => '{"name":"John Doe","email":"john@example.com"}'
+                }
+              ]
+            }
+          ]
+        }
+
+        http_response = instance_double(Net::HTTPResponse)
+        allow(http_response).to receive(:code).and_return("200")
+        allow(http_response).to receive(:body).and_return(response_body.to_json)
+
+        allow_any_instance_of(Net::HTTP).to receive(:request).and_return(http_response)
+
+        result = provider.extract_data(output_schema: output_schema, file_path: txt_file_path)
+
+        expect(result).to include(
+          "name" => "John Doe",
+          "email" => "john@example.com"
+        )
+      end
+
+      it "processes markdown files correctly" do
+        response_body = {
+          "output" => [
+            {
+              "type" => "message",
+              "content" => [
+                {
+                  "type" => "output_text",
+                  "text" => '{"name":"John Doe"}'
+                }
+              ]
+            }
+          ]
+        }
+
+        http_response = instance_double(Net::HTTPResponse)
+        allow(http_response).to receive(:code).and_return("200")
+        allow(http_response).to receive(:body).and_return(response_body.to_json)
+
+        allow_any_instance_of(Net::HTTP).to receive(:request).and_return(http_response)
+
+        result = provider.extract_data(output_schema: output_schema, file_path: md_file_path)
+        expect(result).to include("name" => "John Doe")
+      end
+    end
+
+    context "with empty text file" do
+      before do
+        allow(File).to receive(:exist?).with(empty_file_path).and_return(true)
+        allow(File).to receive(:readable?).with(empty_file_path).and_return(true)
+      end
+
+      it "raises EmptyTextFileError" do
+        expect do
+          provider.extract_data(output_schema: output_schema, file_path: empty_file_path)
+        end.to raise_error(CvParser::EmptyTextFileError)
+      end
+    end
+  end
 end
+
+# rubocop:enable Metrics/BlockLength

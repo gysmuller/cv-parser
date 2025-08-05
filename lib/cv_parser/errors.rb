@@ -11,4 +11,7 @@ module CvParser
   class InvalidRequestError < APIError; end
   class FileNotFoundError < Error; end
   class FileNotReadableError < Error; end
+  class TextFileError < Error; end
+  class TextFileEncodingError < TextFileError; end
+  class EmptyTextFileError < TextFileError; end
 end

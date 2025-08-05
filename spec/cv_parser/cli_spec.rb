@@ -102,5 +102,34 @@ RSpec.describe CvParser::CLI do
         expect(output.string).to include("name: John Doe")
       end
     end
+
+    context "with text files" do
+      let(:txt_file) { fixture_path("sample_resume.txt") }
+      let(:md_file) { fixture_path("sample_resume.md") }
+      let(:empty_file) { fixture_path("empty_resume.txt") }
+
+      it "processes txt files successfully" do
+        cli.run(["--provider", "faker", txt_file])
+        expect(output.string).to include("Parsing CV: #{txt_file}")
+        expect(output.string).to include("Using provider: faker")
+        expect(output.string).to include("John Doe")
+      end
+
+      it "processes markdown files successfully" do
+        cli.run(["--provider", "faker", md_file])
+        expect(output.string).to include("Parsing CV: #{md_file}")
+        expect(output.string).to include("Using provider: faker")
+        expect(output.string).to include("John Doe")
+      end
+
+      it "handles non-existent text files gracefully" do
+        begin
+          cli.run(["--provider", "faker", "non_existent.txt"])
+        rescue SystemExit
+          # Expected behavior
+        end
+        expect(output.string).to match(/Error:.*not found/i)
+      end
+    end
   end
 end

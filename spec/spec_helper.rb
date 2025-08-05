@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require "cv_parser"
+require "rspec/support"
+require "rspec/support/differ"
 require "webmock/rspec"
 
 RSpec.configure do |config|

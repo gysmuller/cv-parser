@@ -5,6 +5,7 @@ require "rexml/document"
 require "rexml/xpath"
 
 module CvParser
+  # Converts DOCX files to PDF format by extracting text content and rendering it as PDF pages
   class PdfConverter
     # Constants modules for better organization
     module PageConstants

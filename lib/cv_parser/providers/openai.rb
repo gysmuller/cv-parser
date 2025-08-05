@@ -42,12 +42,7 @@ module CvParser
       def extract_data(output_schema:, file_path: nil)
         validate_inputs!(output_schema, file_path)
 
-        processed_file_path = prepare_file(file_path)
-        file_id = upload_file(processed_file_path)
-        response = create_response_with_file(file_id, output_schema)
-
-        cleanup_temp_file(processed_file_path, file_path)
-
+        response = process_file_and_get_response(file_path, output_schema)
         parse_response_output(response)
       rescue Timeout::Error => e
         raise APIError, "OpenAI API timeout: #{e.message}"
@@ -73,6 +68,21 @@ module CvParser
       end
 
       private
+
+      def process_file_and_get_response(file_path, output_schema)
+        if text_file?(file_path)
+          # Handle text files without upload
+          text_content = read_text_file_content(file_path)
+          create_response_with_text(text_content, output_schema)
+        else
+          # Existing file upload logic
+          processed_file_path = prepare_file(file_path)
+          file_id = upload_file(processed_file_path)
+          response = create_response_with_file(file_id, output_schema)
+          cleanup_temp_file(processed_file_path, file_path)
+          response
+        end
+      end
 
       def validate_inputs!(output_schema, file_path)
         raise ArgumentError, "File_path must be provided" unless file_path
@@ -277,10 +287,44 @@ module CvParser
         ]
       end
 
+      def create_response_with_text(text_content, schema)
+        uri = URI(API_RESPONSES_URL)
+        payload = build_text_response_payload(text_content, schema)
+        make_responses_api_request(uri, payload)
+      end
+
+      def build_text_response_payload(text_content, schema)
+        {
+          model: @config.model || DEFAULT_MODEL,
+          input: build_text_input_for_responses_api(text_content),
+          text: {
+            format: {
+              type: "json_schema",
+              name: SCHEMA_NAME,
+              schema: schema_to_json_schema(schema)
+            }
+          }
+        }
+      end
+
+      def build_text_input_for_responses_api(text_content)
+        [
+          {
+            role: "user",
+            content: [
+              {
+                type: "input_text",
+                text: "#{build_extraction_prompt}\n\nCV Content:\n#{text_content}"
+              }
+            ]
+          }
+        ]
+      end
+
       def parse_response_output(response)
         # Extract content from Responses API format
         output = response["output"]
-        return nil unless output&.is_a?(Array) && !output.empty?
+        return nil unless output.is_a?(Array) && !output.empty?
 
         # Look for message with text content
         text_content = nil
@@ -289,14 +333,9 @@ module CvParser
           if item.is_a?(Hash)
             if item["type"] == "message" && item["content"]
               item["content"].each do |content_item|
-                if content_item.is_a?(Hash)
-                  if content_item["type"] == "text"
-                    text_content = content_item["text"]
-                    break
-                  elsif content_item["type"] == "output_text"
-                    text_content = content_item["text"]
-                    break
-                  end
+                if content_item.is_a?(Hash) && %w[text output_text].include?(content_item["type"])
+                  text_content = content_item["text"]
+                  break
                 end
               end
             elsif item["type"] == "text" && item["text"]

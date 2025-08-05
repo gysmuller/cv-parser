@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Released]
 
+## [0.1.2] - 2025-08-05
+
+### Changed
+- Add markdown and text file support for CVs
+
+
 ## [0.1.1] - 2025-07-17
 
 ### Changed

@@ -27,16 +27,31 @@ module CvParser
       JSON_SCHEMA_TYPE = "json_schema"
 
       def extract_data(output_schema:, file_path: nil)
-        validate_schema_format!(output_schema)
+        validate_inputs!(output_schema, file_path)
         generate_fake_data(output_schema)
       end
 
-      def upload_file(file_path)
+      def upload_file(_file_path)
         # No-op for faker provider
         { id: "fake-file-#{SecureRandom.hex(8)}" }
       end
 
       private
+
+      def validate_inputs!(output_schema, file_path)
+        validate_schema_format!(output_schema)
+
+        # Validate file if provided
+        return unless file_path
+
+        validate_file_exists!(file_path)
+        validate_file_readable!(file_path)
+
+        # For text files, validate content
+        return unless text_file?(file_path)
+
+        read_text_file_content(file_path) # Just for validation
+      end
 
       def validate_schema_format!(output_schema)
         return if valid_json_schema_format?(output_schema)
@@ -129,7 +144,7 @@ module CvParser
         end
       end
 
-      def generate_string_value(key, description = nil)
+      def generate_string_value(key, _description = nil)
         key_string = key.to_s.downcase
 
         case key_string
