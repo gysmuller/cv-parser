@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 module CvParser
+  # Extracts structured data from CV/resume files using configured LLM providers
   class Extractor
     def initialize(config = CvParser.configuration)
       @config = config

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 module CvParser
+  # Configuration settings for CV parser including LLM provider, API credentials, and extraction options
   class Configuration
     attr_accessor :provider, :model, :api_key, :timeout, :max_retries, :prompt, :system_prompt,
                   :output_schema, :max_tokens, :temperature
