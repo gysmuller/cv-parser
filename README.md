@@ -3,12 +3,14 @@
 A Ruby gem for parsing and extracting structured information from CVs/resumes using LLM providers.
 
 ## Features
-- Convert DOCX to PDF before uploading to LLM providers
-- Extract structured data from CVs by directly uploading files to LLM providers
-- Configure different LLM providers (OpenAI, Anthropic, and Faker for testing)
-- Customizable output schema to match your data requirements (JSON Schema format)
-- Command-line interface for quick parsing and analysis
-- Robust error handling and validation
+- **Multiple file format support**: PDF, DOCX, TXT, and Markdown files
+- **Smart file processing**: Converts DOCX to PDF, processes text files directly (no upload required)
+- **Extract structured data** from CVs using leading LLM providers
+- **Multiple LLM providers**: OpenAI, Anthropic, and Faker (for testing)
+- **Customizable output schema** using JSON Schema format
+- **Command-line interface** for quick parsing and analysis
+- **Performance optimized**: Text files bypass upload for faster processing
+- **Robust error handling** and validation
 
 ## Installation
 
@@ -191,8 +193,20 @@ extractor.extract(
 
 ```ruby
 extractor = CvParser::Extractor.new
+
+# Extract from PDF (uploaded to LLM)
 result = extractor.extract(
   file_path: "path/to/resume.pdf"
+)
+
+# Extract from text file (fast, no upload)
+result = extractor.extract(
+  file_path: "path/to/resume.txt"
+)
+
+# Extract from markdown file (fast, no upload)
+result = extractor.extract(
+  file_path: "path/to/resume.md"
 )
 
 puts "Name: #{result['personal_info']['name']}"
@@ -205,10 +219,15 @@ result['skills'].each { |skill| puts "- #{skill}" }
 ```ruby
 begin
   result = extractor.extract(
-    file_path: "path/to/resume.pdf"
+    file_path: "path/to/resume.txt"  # Works with any supported format
   )
 rescue CvParser::FileNotFoundError, CvParser::FileNotReadableError => e
   puts "File error: #{e.message}"
+rescue CvParser::EmptyTextFileError => e
+  puts "Text file is empty: #{e.message}"
+
+rescue CvParser::TextFileEncodingError => e
+  puts "Text file encoding error: #{e.message}"
 rescue CvParser::ParseError => e
   puts "Error parsing the response: #{e.message}"
 rescue CvParser::APIError => e
@@ -225,10 +244,19 @@ end
 CV Parser also provides a CLI for quick analysis:
 
 ```bash
+# Process different file formats
 cv-parser path/to/resume.pdf
+cv-parser path/to/resume.docx
+cv-parser path/to/resume.txt
+cv-parser path/to/resume.md
+
+# Use different providers
 cv-parser --provider anthropic path/to/resume.pdf
-cv-parser --format yaml --output result.yaml path/to/resume.pdf
-cv-parser --schema custom-schema.json path/to/resume.pdf
+cv-parser --provider openai path/to/resume.txt
+
+# Output options
+cv-parser --format yaml --output result.yaml path/to/resume.md
+cv-parser --schema custom-schema.json path/to/resume.txt
 cv-parser --help
 ```
 
@@ -242,6 +270,45 @@ export CV_PARSER_API_KEY=your-api-key
 cv-parser resume.pdf
 ```
 
+## Supported File Formats
+
+CV Parser supports multiple file formats with optimized processing:
+
+### File Format Support
+
+| Format | Extension | Processing Method | Upload Required | Performance |
+|--------|-----------|-------------------|-----------------|-------------|
+| PDF | `.pdf` | Direct upload | Yes | Standard |
+| DOCX | `.docx` | Convert to PDF → Upload | Yes | Standard |
+| Text | `.txt` | Direct text processing | **No** | **Fast** |
+| Markdown | `.md` | Direct text processing | **No** | **Fast** |
+
+### Performance Benefits of Text Files
+
+Text files (`.txt` and `.md`) offer significant performance advantages:
+
+- **No file upload overhead**: Content is included directly in the API request
+- **Faster processing**: Eliminates the upload → reference workflow
+- **Reduced API calls**: Single request instead of upload + process
+- **Lower bandwidth usage**: Direct text inclusion vs binary file transfer
+- **Better for automation**: Simpler integration in automated workflows
+
+### File Size Limits
+
+- **PDF/DOCX files**: Limited by LLM provider (typically 20MB)
+- **Text files**: No explicit size limits (limited only by LLM provider)
+
+### File Processing Examples
+
+```ruby
+# Fast text processing (no upload)
+extractor.extract(file_path: "resume.txt", output_schema: schema)
+extractor.extract(file_path: "resume.md", output_schema: schema)
+
+# Standard file processing (with upload)
+extractor.extract(file_path: "resume.pdf", output_schema: schema)
+extractor.extract(file_path: "resume.docx", output_schema: schema)
+```
 
 ## Advanced Configuration
 

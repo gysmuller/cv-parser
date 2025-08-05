@@ -47,15 +47,16 @@ module CvParser
           # Convert DOCX to PDF
           @pdf_converter.convert(file_path, temp_pdf_path)
           temp_pdf_path
-        when ".pdf"
-          # Already a PDF, return as-is
+        when ".pdf", ".txt", ".md"
+          # PDF files, text files - return as-is
+          # Text files will be handled as text content by providers
           file_path
         else
           # For other file types, let the provider handle them directly
           file_path
         end
       rescue StandardError => e
-        raise APIError, "Failed to convert DOCX to PDF: #{e.message}"
+        raise APIError, "Failed to convert file: #{e.message}"
       end
 
       def cleanup_temp_file(processed_file_path, original_file_path)
@@ -113,6 +114,21 @@ module CvParser
         return if File.readable?(file_path)
 
         raise FileNotReadableError, "File not readable: #{file_path}"
+      end
+
+      def text_file?(file_path)
+        [".txt", ".md"].include?(File.extname(file_path).downcase)
+      end
+
+      def read_text_file_content(file_path)
+        content = File.read(file_path, encoding: "UTF-8")
+
+        # Validate content is not empty
+        raise EmptyTextFileError, "Text file is empty: #{file_path}" if content.strip.empty?
+
+        content
+      rescue Encoding::InvalidByteSequenceError, Encoding::UndefinedConversionError => e
+        raise TextFileEncodingError, "Invalid text encoding in file #{file_path}: #{e.message}"
       end
     end
   end

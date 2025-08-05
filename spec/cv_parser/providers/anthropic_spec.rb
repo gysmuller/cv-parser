@@ -2,6 +2,8 @@
 
 require "spec_helper"
 
+# rubocop:disable Metrics/BlockLength
+
 RSpec.describe CvParser::Providers::Anthropic do
   let(:config) do
     config = CvParser::Configuration.new
@@ -338,5 +340,94 @@ RSpec.describe CvParser::Providers::Anthropic do
         end.to raise_error(ArgumentError, /File_path must be provided/)
       end
     end
+
+    context "with text files" do
+      let(:txt_file_path) { fixture_path("sample_resume.txt") }
+      let(:md_file_path) { fixture_path("sample_resume.md") }
+      let(:empty_file_path) { fixture_path("empty_resume.txt") }
+
+      before do
+        allow(File).to receive(:exist?).with(txt_file_path).and_return(true)
+        allow(File).to receive(:readable?).with(txt_file_path).and_return(true)
+        allow(File).to receive(:exist?).with(md_file_path).and_return(true)
+        allow(File).to receive(:readable?).with(md_file_path).and_return(true)
+      end
+
+      context "with successful text processing" do
+        it "processes txt files without base64 encoding" do
+          allow_any_instance_of(Faraday::Connection).to receive(:post).and_return(
+            instance_double(
+              Faraday::Response,
+              status: 200,
+              body: {
+                "id" => "msg_01234567",
+                "type" => "message",
+                "role" => "assistant",
+                "content" => [
+                  {
+                    "type" => "tool_use",
+                    "id" => "toolu_01234567",
+                    "name" => "extract_cv_data",
+                    "input" => {
+                      "name" => "John Doe",
+                      "email" => "john.doe@example.com",
+                      "experience" => [
+                        {
+                          "title" => "Software Engineer",
+                          "years" => "5 years"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            )
+          )
+
+          result = provider.extract_data(output_schema: output_schema, file_path: txt_file_path)
+
+          expect(result).to include(
+            "name" => "John Doe",
+            "email" => "john.doe@example.com"
+          )
+        end
+
+        it "processes markdown files correctly" do
+          allow_any_instance_of(Faraday::Connection).to receive(:post).and_return(
+            instance_double(
+              Faraday::Response,
+              status: 200,
+              body: {
+                "content" => [
+                  {
+                    "type" => "tool_use",
+                    "name" => "extract_cv_data",
+                    "input" => { "name" => "John Doe" }
+                  }
+                ]
+              }
+            )
+          )
+
+          result = provider.extract_data(output_schema: output_schema, file_path: md_file_path)
+          expect(result).to include("name" => "John Doe")
+        end
+      end
+
+      context "with empty text file" do
+        before do
+          allow(File).to receive(:exist?).with(empty_file_path).and_return(true)
+          allow(File).to receive(:readable?).with(empty_file_path).and_return(true)
+        end
+
+        it "raises EmptyTextFileError" do
+          expect do
+            provider.extract_data(output_schema: output_schema, file_path: empty_file_path)
+          end.to raise_error(CvParser::EmptyTextFileError)
+        end
+      end
+    end
   end
 end
+
+# rubocop:enable Metrics/BlockLength

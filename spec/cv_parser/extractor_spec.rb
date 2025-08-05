@@ -15,8 +15,11 @@ RSpec.describe CvParser::Extractor do
   let(:extractor) { described_class.new(config) }
   let(:output_schema) do
     {
-      name: "string",
-      email: "string"
+      type: "json_schema",
+      properties: {
+        name: { type: "string" },
+        email: { type: "string" }
+      }
     }
   end
 
@@ -74,6 +77,53 @@ RSpec.describe CvParser::Extractor do
 
       result = extractor.extract(file_path: sample_file_path, output_schema: output_schema)
       expect(result).to eq(expected_result)
+    end
+  end
+
+  describe "#extract with text files" do
+    let(:txt_file_path) { fixture_path("sample_resume.txt") }
+    let(:md_file_path) { fixture_path("sample_resume.md") }
+    let(:expected_result) { { "name" => "John Doe", "email" => "john@example.com" } }
+
+    before do
+      allow(File).to receive(:exist?).with(txt_file_path).and_return(true)
+      allow(File).to receive(:readable?).with(txt_file_path).and_return(true)
+      allow(File).to receive(:exist?).with(md_file_path).and_return(true)
+      allow(File).to receive(:readable?).with(md_file_path).and_return(true)
+    end
+
+    it "successfully extracts data from txt files" do
+      # Create new extractor with faker provider
+      CvParser.configure do |config|
+        config.provider = :faker
+        config.api_key = "fake-api-key"
+      end
+
+      faker_extractor = CvParser::Extractor.new
+      result = faker_extractor.extract(file_path: txt_file_path, output_schema: output_schema)
+      expect(result).to be_a(Hash)
+      expect(result).to include("name")
+    end
+
+    it "successfully extracts data from markdown files" do
+      # Create new extractor with faker provider
+      CvParser.configure do |config|
+        config.provider = :faker
+        config.api_key = "fake-api-key"
+      end
+
+      faker_extractor = CvParser::Extractor.new
+      result = faker_extractor.extract(file_path: md_file_path, output_schema: output_schema)
+      expect(result).to be_a(Hash)
+      expect(result).to include("name")
+    end
+
+    it "validates text file existence" do
+      allow(File).to receive(:exist?).with("non_existent.txt").and_return(false)
+
+      expect do
+        extractor.extract(file_path: "non_existent.txt", output_schema: output_schema)
+      end.to raise_error(CvParser::FileNotFoundError)
     end
   end
 end
